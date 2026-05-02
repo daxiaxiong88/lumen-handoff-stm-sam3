@@ -15,9 +15,12 @@ from lumen.data import (
     ImageMetadata,
     ScienceAugmentation,
     ScientificImageDataset,
+    SegmentationPairDataset,
     STEMDataset,
     SupervisionBridge,
+    UnlabeledScientificImageDataset,
     detection_head_to_detections,
+    ensure_channel_count,
     keypoints_to_supervision,
     load_image_array,
     prepare_image_for_supervision,
@@ -478,6 +481,58 @@ class TestScientificImageDataset:
         bogus.write_bytes(b"not an image")
         with pytest.raises(ValueError):
             load_image_array(bogus)
+
+
+class TestWorkflowDatasets:
+    def test_ensure_channel_count_rgb_to_gray(self) -> None:
+        x = torch.stack(
+            [
+                torch.ones(4, 4),
+                torch.zeros(4, 4),
+                torch.zeros(4, 4),
+            ]
+        )
+        out = ensure_channel_count(x, channels=1)
+        assert out.shape == (1, 4, 4)
+        torch.testing.assert_close(out, torch.full((1, 4, 4), 0.299))
+
+    def test_unlabeled_dataset_skips_labels_and_batches(
+        self, tmp_path: Path
+    ) -> None:
+        Image.fromarray(np.zeros((16, 16), dtype=np.uint8)).save(tmp_path / "a.png")
+        rgb = np.zeros((20, 20, 3), dtype=np.uint8)
+        Image.fromarray(rgb).save(tmp_path / "b.png")
+        Image.fromarray(np.ones((16, 16), dtype=np.uint8)).save(
+            tmp_path / "a_label.png"
+        )
+
+        ds = UnlabeledScientificImageDataset(
+            tmp_path, extensions=(".png",), channels=1, image_size=8
+        )
+        assert len(ds) == 2
+        assert all("_label" not in p.name for p in ds.paths)
+        batch = torch.stack([ds[0]["image"], ds[1]["image"]])
+        assert batch.shape == (2, 1, 8, 8)
+
+    def test_segmentation_pair_dataset_global_label_mapping(
+        self, tmp_path: Path
+    ) -> None:
+        Image.fromarray(np.zeros((8, 8), dtype=np.uint8)).save(tmp_path / "a.png")
+        Image.fromarray(np.zeros((8, 8, 3), dtype=np.uint8)).save(tmp_path / "b.png")
+        Image.fromarray(np.full((8, 8), 10, dtype=np.uint8)).save(
+            tmp_path / "a_label.png"
+        )
+        Image.fromarray(np.full((8, 8), 20, dtype=np.uint8)).save(
+            tmp_path / "b_label.png"
+        )
+
+        ds = SegmentationPairDataset(tmp_path, image_size=16, channels=1)
+        assert ds.num_classes == 2
+        assert ds.label_values == (10, 20)
+        assert ds[0]["image"].shape == (1, 16, 16)
+        assert ds[0]["mask"].shape == (16, 16)
+        assert int(ds[0]["mask"].unique()) == 0
+        assert int(ds[1]["mask"].unique()) == 1
 
 
 class TestSpecializedDatasets:

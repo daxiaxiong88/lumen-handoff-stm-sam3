@@ -32,6 +32,7 @@ from typing import Any, Callable, Union
 
 import numpy as np
 import torch
+import torch.nn.functional as nn_functional
 from torch.utils.data import Dataset
 
 PathLike = Union[str, os.PathLike]
@@ -211,6 +212,51 @@ def _to_chw_tensor(arr: np.ndarray, frame_index: int | None) -> torch.Tensor:
     return torch.from_numpy(np.ascontiguousarray(chw)).float()
 
 
+def ensure_channel_count(tensor: torch.Tensor, channels: int = 1) -> torch.Tensor:
+    """Convert a CHW image tensor to a stable channel count.
+
+    Scientific image workflows often mix grayscale PNGs with RGB/RGBA exports.
+    This helper makes batching deterministic by converting RGB/RGBA to grayscale
+    when ``channels=1`` or by repeating grayscale inputs when ``channels=3``.
+    """
+    if tensor.dim() != 3:
+        raise ValueError(f"Expected CHW tensor, got shape {tuple(tensor.shape)}")
+    if channels not in (1, 3):
+        raise ValueError("channels must be 1 or 3")
+    if tensor.shape[0] == channels:
+        return tensor
+    if tensor.shape[0] == 4:
+        tensor = tensor[:3]
+    if channels == 1:
+        if tensor.shape[0] == 1:
+            return tensor
+        if tensor.shape[0] == 3:
+            weights = tensor.new_tensor([0.299, 0.587, 0.114]).view(3, 1, 1)
+            return (tensor * weights).sum(dim=0, keepdim=True)
+    if channels == 3 and tensor.shape[0] == 1:
+        return tensor.repeat(3, 1, 1)
+    raise ValueError(
+        f"Cannot convert image with {tensor.shape[0]} channel(s) to {channels}"
+    )
+
+
+def resize_chw(
+    tensor: torch.Tensor,
+    image_size: int | tuple[int, int],
+    *,
+    mode: str = "bilinear",
+) -> torch.Tensor:
+    """Resize a CHW tensor with torch interpolation."""
+    size = (image_size, image_size) if isinstance(image_size, int) else image_size
+    is_mask = mode == "nearest"
+    x = tensor.unsqueeze(0).float()
+    if is_mask:
+        out = nn_functional.interpolate(x, size=size, mode=mode)
+    else:
+        out = nn_functional.interpolate(x, size=size, mode=mode, align_corners=False)
+    return out.squeeze(0)
+
+
 def _extract_metadata(
     path: Path,
     arr: np.ndarray,
@@ -386,11 +432,155 @@ class FIBDataset(ScientificImageDataset):
         )
 
 
+class UnlabeledScientificImageDataset(ScientificImageDataset):
+    """Batched unlabeled image dataset for self-supervised pretraining.
+
+    It filters out segmentation label files by default, converts all images to
+    a fixed channel count, and optionally resizes them so the default
+    ``DataLoader`` collate function works on mixed microscopy exports.
+    """
+
+    def __init__(
+        self,
+        root: PathLike,
+        *,
+        extensions: tuple[str, ...] = SUPPORTED_EXTENSIONS,
+        recursive: bool = True,
+        transform: Callable[[torch.Tensor], torch.Tensor] | None = None,
+        normalize: bool = True,
+        return_metadata: bool = False,
+        frame_index: int | None = None,
+        channels: int = 1,
+        image_size: int | tuple[int, int] | None = None,
+        exclude_label_suffixes: tuple[str, ...] = (
+            "_label.png",
+            "_label.tif",
+            "_label.tiff",
+        ),
+    ) -> None:
+        super().__init__(
+            root,
+            extensions=extensions,
+            recursive=recursive,
+            transform=None,
+            normalize=normalize,
+            return_metadata=return_metadata,
+            frame_index=frame_index,
+        )
+        self.paths = [
+            p
+            for p in self.paths
+            if not any(
+                p.name.lower().endswith(suffix)
+                for suffix in exclude_label_suffixes
+            )
+        ]
+        self.post_transform = transform
+        self.channels = channels
+        self.image_size = image_size
+
+    def __getitem__(self, index: int) -> dict[str, Any]:
+        sample = super().__getitem__(index)
+        tensor = ensure_channel_count(sample["image"], self.channels)
+        if self.image_size is not None:
+            tensor = resize_chw(tensor, self.image_size, mode="bilinear")
+        if self.post_transform is not None:
+            tensor = self.post_transform(tensor)
+        sample["image"] = tensor
+        return sample
+
+
+class SegmentationPairDataset(Dataset[dict[str, Any]]):
+    """Image/mask pairs for fine-tuning and weakly supervised segmentation.
+
+    Files named ``*_label.png`` are paired with the same stem without the
+    ``_label`` suffix. Label values are remapped with one global mapping across
+    the dataset, so class ids remain stable between samples.
+    """
+
+    def __init__(
+        self,
+        root: PathLike,
+        *,
+        image_size: int | tuple[int, int] | None = None,
+        channels: int = 1,
+        normalize: bool = True,
+        recursive: bool = False,
+        label_suffix: str = "_label.png",
+    ) -> None:
+        self.root = Path(root)
+        self.image_size = image_size
+        self.channels = channels
+        self.normalize = normalize
+        globber = self.root.rglob if recursive else self.root.glob
+        label_paths = sorted(globber(f"*{label_suffix}"))
+        self.pairs: list[tuple[Path, Path]] = []
+        for label_path in label_paths:
+            image_name = label_path.name.removesuffix(label_suffix) + ".png"
+            image_path = label_path.with_name(image_name)
+            if image_path.exists():
+                self.pairs.append((image_path.resolve(), label_path.resolve()))
+        if not self.pairs:
+            raise FileNotFoundError(f"No image/{label_suffix} pairs found under {root}")
+
+        values: set[int] = set()
+        for _, label_path in self.pairs:
+            label, _ = load_image_array(label_path)
+            if label.ndim == 3:
+                label = label[..., 0]
+            values.update(int(v) for v in np.unique(label))
+        self.label_values = tuple(sorted(values))
+        self.label_to_index = {value: idx for idx, value in enumerate(self.label_values)}
+
+    def __len__(self) -> int:
+        return len(self.pairs)
+
+    @property
+    def num_classes(self) -> int:
+        return len(self.label_values)
+
+    def __getitem__(self, index: int) -> dict[str, Any]:
+        image_path, label_path = self.pairs[index]
+        image, _ = load_image_array(image_path)
+        label, _ = load_image_array(label_path)
+        if self.normalize:
+            image = _normalize_to_float(image)
+        image_tensor = ensure_channel_count(_to_chw_tensor(image, None), self.channels)
+        if label.ndim == 3:
+            label = label[..., 0]
+        mask = torch.empty(label.shape, dtype=torch.long)
+        for old_value, new_index in self.label_to_index.items():
+            mask[torch.from_numpy(label == old_value)] = new_index
+
+        if self.image_size is not None:
+            image_tensor = resize_chw(image_tensor, self.image_size, mode="bilinear")
+            mask = (
+                resize_chw(
+                    mask.unsqueeze(0).float(),
+                    self.image_size,
+                    mode="nearest",
+                )
+                .squeeze(0)
+                .long()
+            )
+
+        return {
+            "image": image_tensor,
+            "mask": mask,
+            "path": str(image_path),
+            "label_path": str(label_path),
+        }
+
+
 __all__ = [
     "FIBDataset",
     "ImageMetadata",
+    "SegmentationPairDataset",
     "STEMDataset",
     "SUPPORTED_EXTENSIONS",
     "ScientificImageDataset",
+    "UnlabeledScientificImageDataset",
+    "ensure_channel_count",
     "load_image_array",
+    "resize_chw",
 ]

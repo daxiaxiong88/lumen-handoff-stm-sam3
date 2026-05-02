@@ -5,6 +5,11 @@ import torch
 
 from lumen.models import EUPEEncoder
 from lumen.training import ContrastiveTrainer, HybridTrainer, MAETrainer
+from lumen.training.workflow import (
+    move_batch_to_device,
+    train_fine_tune_epoch,
+    train_self_supervised_epoch,
+)
 
 
 def _get_available_devices() -> list[str]:
@@ -224,6 +229,49 @@ class TestGradients:
         assert head_grad is not None
         assert encoder_grad.abs().sum() > 0
         assert head_grad.abs().sum() > 0
+
+
+class TestWorkflowHelpers:
+    def test_move_batch_to_device_handles_nested_targets(self) -> None:
+        batch = {
+            "image": torch.zeros(1, 1, 16, 16),
+            "targets": {"classes": torch.zeros(1, 1, dtype=torch.long)},
+            "path": "sample.png",
+        }
+        out = move_batch_to_device(batch, "cpu")
+        assert out["image"].device.type == "cpu"
+        assert out["targets"]["classes"].device.type == "cpu"
+        assert out["path"] == "sample.png"
+
+    def test_self_supervised_epoch_steps_optimizer(
+        self, tiny_encoder: EUPEEncoder
+    ) -> None:
+        trainer = MAETrainer(
+            tiny_encoder,
+            mask_ratio=0.5,
+            decoder_embed_dim=64,
+            decoder_depth=1,
+            decoder_num_heads=4,
+        )
+        optimizer = torch.optim.AdamW(trainer.parameters(), lr=1e-4)
+        batch = {"image": torch.randn(2, 1, 64, 64)}
+        metrics = train_self_supervised_epoch(trainer, [batch], optimizer)
+        assert metrics["loss"] >= 0.0
+
+    def test_fine_tune_epoch_runs(self, tiny_encoder: EUPEEncoder) -> None:
+        from lumen.training import SegmentationTrainer
+
+        trainer = SegmentationTrainer(
+            tiny_encoder,
+            num_classes=2,
+            scheduler_name="none",
+        )
+        batch = {
+            "image": torch.randn(2, 1, 64, 64),
+            "mask": torch.randint(0, 2, (2, 64, 64)),
+        }
+        metrics = train_fine_tune_epoch(trainer, [batch])
+        assert isinstance(metrics["loss"], float)
 
     def test_hybrid_gradients_flow(self, tiny_encoder: EUPEEncoder) -> None:
         """Backpropagation updates all hybrid components."""

@@ -4,9 +4,13 @@ from lumen.data.augment import ScienceAugmentation
 from lumen.data.dataset import (
     FIBDataset,
     ImageMetadata,
+    SegmentationPairDataset,
     ScientificImageDataset,
     STEMDataset,
+    UnlabeledScientificImageDataset,
+    ensure_channel_count,
     load_image_array,
+    resize_chw,
 )
 from lumen.data.supervision_bridge import (
     SupervisionBridge,
@@ -21,13 +25,17 @@ __all__ = [
     "FIBDataset",
     "ImageMetadata",
     "ScienceAugmentation",
+    "SegmentationPairDataset",
     "ScientificImageDataset",
     "STEMDataset",
     "SupervisionBridge",
+    "UnlabeledScientificImageDataset",
     "detection_head_to_detections",
+    "ensure_channel_count",
     "keypoints_to_supervision",
     "load_image_array",
     "prepare_image_for_supervision",
+    "resize_chw",
     "segmentation_to_detections",
     "upsample_logits_to_image",
 ]

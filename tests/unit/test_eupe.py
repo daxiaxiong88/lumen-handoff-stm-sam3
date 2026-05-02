@@ -3,12 +3,7 @@ from __future__ import annotations
 import pytest
 import torch
 
-from lumen.models import (
-    DetectionHead,
-    EUPEEncoder,
-    KeypointHead,
-    SegmentationHead,
-)
+from lumen.models import DetectionHead, EUPEEncoder, KeypointHead, SegmentationHead
 
 
 def _get_available_devices() -> list[str]:
@@ -89,10 +84,10 @@ class TestEUPEEncoder:
         out = model(x)
         assert out.shape == (1, (224 // 16) ** 2, model.embed_dim)
 
-    def test_invalid_pos_encoding_raises(self) -> None:
-        """Unknown pos_encoding string raises ValueError."""
-        with pytest.raises(ValueError, match="Unknown pos_encoding"):
-            EUPEEncoder(pos_encoding="invalid")
+    def test_uses_official_vendor_model(self) -> None:
+        """Encoder wraps the official EUPE DinoVisionTransformer implementation."""
+        model = EUPEEncoder(embed_dim=64, depth=2, num_heads=4)
+        assert type(model.model).__name__ == "DinoVisionTransformer"
 
     def test_non_divisible_size(self) -> None:
         """Input size not divisible by patch_size still works via Conv2d floor behavior."""

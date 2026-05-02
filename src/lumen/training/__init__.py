@@ -24,6 +24,12 @@ from lumen.training.weak_supervision import (
     PseudoLabeler,
     WeakSupervisionTrainer,
 )
+from lumen.training.workflow import (
+    move_batch_to_device,
+    train_fine_tune_epoch,
+    train_self_supervised_epoch,
+    train_weak_supervised_epoch,
+)
 
 __all__ = [
     "MAETrainer",
@@ -40,6 +46,10 @@ __all__ = [
     "MeanTeacher",
     "CoTeaching",
     "WeakSupervisionTrainer",
+    "move_batch_to_device",
+    "train_fine_tune_epoch",
+    "train_self_supervised_epoch",
+    "train_weak_supervised_epoch",
     "ReplayBuffer",
     "EWCRegularizer",
     "LwFRegularizer",

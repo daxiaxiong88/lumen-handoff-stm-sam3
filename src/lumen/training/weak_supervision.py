@@ -40,9 +40,12 @@ class PseudoLabeler:
             where ``confidence_mask`` is a boolean mask of accepted
             pseudo-labels.
         """
+        was_training = model.training
         model.eval()
         with torch.no_grad():
             logits = model(data)
+        if was_training:
+            model.train()
 
         if logits.dim() == 4:
             # Segmentation: (B, num_classes, H, W)
@@ -53,7 +56,11 @@ class PseudoLabeler:
 
         if logits.dim() == 3 and logits.shape[-1] == 4:
             # Detection bbox: not directly pseudo-labelable; return dummy
-            return logits, torch.ones(logits.shape[0], dtype=torch.bool)
+            return logits, torch.ones(
+                logits.shape[0],
+                dtype=torch.bool,
+                device=logits.device,
+            )
 
         if logits.dim() == 3 and logits.shape[-1] == 2:
             # Keypoint: continuous, confidence via variance proxy
@@ -252,6 +259,7 @@ class WeakSupervisionTrainer(nn.Module):
         logits: torch.Tensor,
         targets: torch.Tensor | dict[str, torch.Tensor],
         unlabeled: torch.Tensor | None = None,
+        labeled_inputs: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Compute supervised + weak-supervision loss.
 
@@ -259,6 +267,8 @@ class WeakSupervisionTrainer(nn.Module):
             logits: Model predictions.
             targets: Ground-truth labels or target dict.
             unlabeled: Optional unlabeled batch for pseudo-labeling.
+            labeled_inputs: Labeled input images. Used as the consistency
+                batch when ``unlabeled`` is absent.
 
         Returns:
             Total loss scalar.
@@ -287,13 +297,12 @@ class WeakSupervisionTrainer(nn.Module):
                 loss = loss + self.pseudo_weight * pseudo_loss
 
         if self.mean_teacher is not None and self.consistency_weight > 0:
+            consistency_inputs = unlabeled if unlabeled is not None else labeled_inputs
+            if consistency_inputs is None:
+                return loss
             with torch.no_grad():
-                teacher_logits = self.mean_teacher.teacher(
-                    unlabeled if unlabeled is not None else logits
-                )
-            student_logits = self.base_trainer(
-                unlabeled if unlabeled is not None else logits
-            )
+                teacher_logits = self.mean_teacher.teacher(consistency_inputs)
+            student_logits = self.base_trainer(consistency_inputs)
             if isinstance(student_logits, tuple):
                 student_logits = student_logits[0]
             if isinstance(teacher_logits, tuple):
@@ -327,13 +336,13 @@ class WeakSupervisionTrainer(nn.Module):
         ):
             with torch.autocast(device_type=x.device.type):
                 logits = self.forward(x)
-                loss = self.compute_loss(logits, targets, unlabeled)
+                loss = self.compute_loss(logits, targets, unlabeled, labeled_inputs=x)
             self.base_trainer.scaler.scale(loss).backward()
             self.base_trainer.scaler.step(self.base_trainer.optimizer)
             self.base_trainer.scaler.update()
         else:
             logits = self.forward(x)
-            loss = self.compute_loss(logits, targets, unlabeled)
+            loss = self.compute_loss(logits, targets, unlabeled, labeled_inputs=x)
             loss.backward()
             self.base_trainer.optimizer.step()
 
