@@ -8,6 +8,9 @@ from typing import Literal
 import torch
 import torch.nn as nn
 
+from lumen.models.encoder_base import EncoderBase
+from lumen.models.registry import register_encoder
+
 
 @dataclass
 class EUPEConfig:
@@ -44,7 +47,7 @@ def _ensure_vendor_on_path(vendor_dir: str | Path | None = None) -> Path:
     return vendor_path
 
 
-class EUPEEncoder(nn.Module):
+class EUPEEncoder(EncoderBase):
     """Lumen adapter around the official local ``vandor/EUPE`` ViT encoder.
 
     This class is intentionally thin: all patch embedding, RoPE position
@@ -205,6 +208,7 @@ class EUPEEncoder(nn.Module):
         return model
 
 
+@register_encoder("eupe-pretrained")
 def load_vendor_eupe_encoder(
     variant: Literal["vit_t", "vit_s", "vit_b"] = "vit_t",
     *,
@@ -232,6 +236,12 @@ def load_vendor_eupe_encoder(
     encoder.auto_convert_input_channels = True
     encoder.eval()
     return encoder
+
+
+@register_encoder("eupe")
+def _build_eupe_encoder(**kwargs: object) -> EUPEEncoder:
+    """Registry factory for a freshly-initialized EUPE encoder."""
+    return EUPEEncoder(**kwargs)  # type: ignore[arg-type]
 
 
 __all__ = [

@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as nn_functional
 
-from lumen.models.eupe import EUPEEncoder
+from lumen.models.encoder_base import EncoderProtocol
 from lumen.models.heads import DetectionHead, KeypointHead, SegmentationHead
 
 
@@ -27,7 +27,7 @@ class SegmentationTrainer(nn.Module):
     """Fine-tunes EUPE + SegmentationHead for pixel-wise classification.
 
     Args:
-        encoder: EUPEEncoder instance.
+        encoder: EncoderProtocol instance.
         num_classes: Number of segmentation classes.
         pretrained_path: Optional path to pretrained EUPE weights.
         optimizer_name: Optimizer class name (``"AdamW"``, ``"Adam"``, ``"SGD"``).
@@ -39,7 +39,7 @@ class SegmentationTrainer(nn.Module):
 
     def __init__(
         self,
-        encoder: EUPEEncoder,
+        encoder: EncoderProtocol,
         num_classes: int,
         pretrained_path: str | None = None,
         optimizer_name: str = "AdamW",
@@ -171,7 +171,7 @@ class DetectionTrainer(nn.Module):
     objectness.
 
     Args:
-        encoder: EUPEEncoder instance.
+        encoder: EncoderProtocol instance.
         num_classes: Number of object classes (excluding background).
         pretrained_path: Optional path to pretrained EUPE weights.
         optimizer_name: Optimizer class name.
@@ -183,7 +183,7 @@ class DetectionTrainer(nn.Module):
 
     def __init__(
         self,
-        encoder: EUPEEncoder,
+        encoder: EncoderProtocol,
         num_classes: int,
         pretrained_path: str | None = None,
         optimizer_name: str = "AdamW",
@@ -377,7 +377,7 @@ class KeypointTrainer(nn.Module):
     """Fine-tunes EUPE + KeypointHead for coordinate regression.
 
     Args:
-        encoder: EUPEEncoder instance.
+        encoder: EncoderProtocol instance.
         num_keypoints: Number of keypoints to predict.
         pretrained_path: Optional path to pretrained EUPE weights.
         optimizer_name: Optimizer class name.
@@ -389,7 +389,7 @@ class KeypointTrainer(nn.Module):
 
     def __init__(
         self,
-        encoder: EUPEEncoder,
+        encoder: EncoderProtocol,
         num_keypoints: int,
         pretrained_path: str | None = None,
         optimizer_name: str = "AdamW",

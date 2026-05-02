@@ -5,7 +5,7 @@ from typing import Any
 import torch
 import torch.nn as nn
 
-from lumen.models.eupe import EUPEEncoder
+from lumen.models.encoder_base import EncoderProtocol
 from lumen.training.contrastive import ContrastiveTrainer
 from lumen.training.mae import MAEDecoder, MAETrainer
 
@@ -17,7 +17,7 @@ class HybridTrainer(nn.Module):
     contrastive pipeline in parallel, weighting the two losses.
 
     Args:
-        encoder: EUPEEncoder instance.
+        encoder: EncoderProtocol instance.
         mae_decoder: MAEDecoder instance. If ``None``, built automatically.
         projection_head: ProjectionHead instance. If ``None``, built
             automatically.
@@ -33,7 +33,7 @@ class HybridTrainer(nn.Module):
 
     def __init__(
         self,
-        encoder: EUPEEncoder,
+        encoder: EncoderProtocol,
         mae_decoder: MAEDecoder | None = None,
         projection_head: nn.Module | None = None,
         augmentations: nn.Module | None = None,

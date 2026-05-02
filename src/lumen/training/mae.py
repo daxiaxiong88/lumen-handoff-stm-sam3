@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as nn_functional
 
-from lumen.models.eupe import EUPEEncoder
+from lumen.models.encoder_base import EncoderProtocol
 
 
 class MAEDecoder(nn.Module):
@@ -133,7 +133,7 @@ class MAETrainer(nn.Module):
     Loss is computed only on the masked patches.
 
     Args:
-        encoder: EUPEEncoder instance.
+        encoder: EncoderProtocol instance.
         decoder: MAEDecoder instance. If ``None``, a default decoder is
             built from ``decoder_*`` kwargs.
         mask_ratio: Fraction of patches to mask (default 0.75).
@@ -147,7 +147,7 @@ class MAETrainer(nn.Module):
 
     def __init__(
         self,
-        encoder: EUPEEncoder,
+        encoder: EncoderProtocol,
         decoder: MAEDecoder | None = None,
         mask_ratio: float = 0.75,
         decoder_embed_dim: int = 256,

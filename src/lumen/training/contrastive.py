@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as nn_functional
 
-from lumen.models.eupe import EUPEEncoder
+from lumen.models.encoder_base import EncoderProtocol
 
 
 class ProjectionHead(nn.Module):
@@ -180,7 +180,7 @@ class ContrastiveTrainer(nn.Module):
     through an MLP head, and applies NT-Xent loss.
 
     Args:
-        encoder: EUPEEncoder instance.
+        encoder: EncoderProtocol instance.
         projection_head: ProjectionHead instance. If ``None``, a default
             head is built.
         augmentations: Augmentation module. If ``None``, default
@@ -192,7 +192,7 @@ class ContrastiveTrainer(nn.Module):
 
     def __init__(
         self,
-        encoder: EUPEEncoder,
+        encoder: EncoderProtocol,
         projection_head: nn.Module | None = None,
         augmentations: nn.Module | None = None,
         temperature: float = 0.5,
