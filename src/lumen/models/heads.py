@@ -68,7 +68,21 @@ class SegmentationHead(nn.Module):
             Segmentation logits of shape (B, num_classes, H, W).
         """
         batch_size, num_tokens, channels = x.shape
-        h_patches = w_patches = int(num_tokens**0.5)
+        h_img, w_img = image_size
+        h_patches = h_img // self.patch_size
+        w_patches = w_img // self.patch_size
+        if h_patches * w_patches != num_tokens:
+            # Fall back to square assumption when image_size is inconsistent
+            # with the token count (e.g. encoders that crop to a multiple of
+            # patch_size internally).
+            side = int(round(num_tokens**0.5))
+            if side * side != num_tokens:
+                raise ValueError(
+                    f"Cannot infer token grid: {num_tokens} tokens are not a "
+                    f"square and do not match image_size={image_size} with "
+                    f"patch_size={self.patch_size}"
+                )
+            h_patches = w_patches = side
         x = (
             x.transpose(1, 2)
             .contiguous()

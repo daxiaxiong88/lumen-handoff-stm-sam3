@@ -10,6 +10,19 @@ from lumen.models.eupe import EUPEEncoder
 from lumen.models.heads import DetectionHead, KeypointHead, SegmentationHead
 
 
+def _build_grad_scaler(mixed_precision: bool) -> Any:
+    """Build a GradScaler when mixed precision is requested AND supported.
+
+    GradScaler is a CUDA-only feature; on MPS / CPU autocast itself works
+    but no scaler is needed. Returns ``None`` when the device backend
+    cannot use a scaler so that callers can fall back to plain autocast
+    or FP32.
+    """
+    if not mixed_precision or not torch.cuda.is_available():
+        return None
+    return torch.amp.GradScaler("cuda")  # type: ignore[attr-defined]
+
+
 class SegmentationTrainer(nn.Module):
     """Fine-tunes EUPE + SegmentationHead for pixel-wise classification.
 
@@ -33,6 +46,9 @@ class SegmentationTrainer(nn.Module):
         lr: float = 1e-4,
         weight_decay: float = 1e-4,
         scheduler_name: str = "cosine",
+        scheduler_t_max: int = 100,
+        scheduler_step_size: int = 30,
+        scheduler_gamma: float = 0.1,
         mixed_precision: bool = False,
     ) -> None:
         super().__init__()
@@ -40,6 +56,9 @@ class SegmentationTrainer(nn.Module):
         self.head = SegmentationHead(encoder.embed_dim, num_classes, encoder.patch_size)
         self.num_classes = num_classes
         self.mixed_precision = mixed_precision
+        self.scheduler_t_max: int = scheduler_t_max
+        self.scheduler_step_size: int = scheduler_step_size
+        self.scheduler_gamma: float = scheduler_gamma
         self._device = next(encoder.parameters()).device
 
         if pretrained_path is not None:
@@ -47,11 +66,7 @@ class SegmentationTrainer(nn.Module):
 
         self.optimizer = self._build_optimizer(optimizer_name, lr, weight_decay)
         self.scheduler = self._build_scheduler(scheduler_name)
-        self.scaler = (
-            torch.amp.GradScaler("cuda")
-            if mixed_precision and torch.cuda.is_available()
-            else None
-        )
+        self.scaler = _build_grad_scaler(mixed_precision)
 
     def _load_pretrained(self, path: str) -> None:
         """Load pretrained EUPE weights."""
@@ -76,10 +91,14 @@ class SegmentationTrainer(nn.Module):
     def _build_scheduler(self, name: str) -> Any:
         """Build LR scheduler."""
         if name == "cosine":
-            return torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=100)
+            return torch.optim.lr_scheduler.CosineAnnealingLR(
+                self.optimizer, T_max=self.scheduler_t_max
+            )
         if name == "step":
             return torch.optim.lr_scheduler.StepLR(
-                self.optimizer, step_size=30, gamma=0.1
+                self.optimizer,
+                step_size=self.scheduler_step_size,
+                gamma=self.scheduler_gamma,
             )
         if name == "none" or name is None:
             return None
@@ -122,13 +141,17 @@ class SegmentationTrainer(nn.Module):
         targets = batch["mask"]
         self.optimizer.zero_grad()
 
-        if self.mixed_precision and self.scaler is not None:
+        if self.mixed_precision:
             with torch.autocast(device_type=x.device.type):
                 logits = self.forward(x)
                 loss = self.compute_loss(logits, targets)
-            self.scaler.scale(loss).backward()
-            self.scaler.step(self.optimizer)
-            self.scaler.update()
+            if self.scaler is not None:
+                self.scaler.scale(loss).backward()
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
+            else:
+                loss.backward()
+                self.optimizer.step()
         else:
             logits = self.forward(x)
             loss = self.compute_loss(logits, targets)
@@ -167,6 +190,9 @@ class DetectionTrainer(nn.Module):
         lr: float = 1e-4,
         weight_decay: float = 1e-4,
         scheduler_name: str = "cosine",
+        scheduler_t_max: int = 100,
+        scheduler_step_size: int = 30,
+        scheduler_gamma: float = 0.1,
         mixed_precision: bool = False,
     ) -> None:
         super().__init__()
@@ -174,6 +200,9 @@ class DetectionTrainer(nn.Module):
         self.head = DetectionHead(encoder.embed_dim, num_classes, encoder.patch_size)
         self.num_classes = num_classes
         self.mixed_precision = mixed_precision
+        self.scheduler_t_max: int = scheduler_t_max
+        self.scheduler_step_size: int = scheduler_step_size
+        self.scheduler_gamma: float = scheduler_gamma
         self._device = next(encoder.parameters()).device
 
         if pretrained_path is not None:
@@ -181,11 +210,7 @@ class DetectionTrainer(nn.Module):
 
         self.optimizer = self._build_optimizer(optimizer_name, lr, weight_decay)
         self.scheduler = self._build_scheduler(scheduler_name)
-        self.scaler = (
-            torch.amp.GradScaler("cuda")
-            if mixed_precision and torch.cuda.is_available()
-            else None
-        )
+        self.scaler = _build_grad_scaler(mixed_precision)
 
     def _load_pretrained(self, path: str) -> None:
         state = torch.load(path, map_location=self._device, weights_only=True)
@@ -207,10 +232,14 @@ class DetectionTrainer(nn.Module):
 
     def _build_scheduler(self, name: str) -> Any:
         if name == "cosine":
-            return torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=100)
+            return torch.optim.lr_scheduler.CosineAnnealingLR(
+                self.optimizer, T_max=self.scheduler_t_max
+            )
         if name == "step":
             return torch.optim.lr_scheduler.StepLR(
-                self.optimizer, step_size=30, gamma=0.1
+                self.optimizer,
+                step_size=self.scheduler_step_size,
+                gamma=self.scheduler_gamma,
             )
         if name == "none" or name is None:
             return None
@@ -251,68 +280,61 @@ class DetectionTrainer(nn.Module):
         """
         target_classes = targets["classes"]
         target_bboxes = targets["bboxes"]
-        target_obj = targets.get("objectness", torch.ones_like(target_classes))
 
         # DetectionHead outputs (B, N, num_classes), (B, N, 4), (B, N, 1)
-        # where N = number of patches (e.g. 14x14 = 196)
-        # Targets are (B, max_objects) with padding by -1
-        # We need to match predictions to targets via Hungarian matching or simple assignment
-        # For simplicity, take top-k predictions where k = number of valid objects
-        
-        # Count valid objects per image
+        # where N = number of patches (e.g. 14x14 = 196).
+        # Targets are (B, max_objects) padded with class_id == -1.
         valid_mask = (target_classes != -1)  # (B, max_objects)
         num_valid = valid_mask.sum(dim=1)  # (B,)
-        
-        B = class_logits.shape[0]
-        N = class_logits.shape[1]
-        
-        # For each image, select top-num_valid predictions by objectness score
-        # objectness_logits: (B, N, 1) -> squeeze to (B, N)
+
+        # For each image, select top-num_valid predictions by objectness.
         obj_scores = objectness_logits.squeeze(-1)  # (B, N)
-        
+        batch_size = obj_scores.shape[0]
+
+        # Build a per-token objectness target across the full grid: 1 for the
+        # top-k predictions selected as positives, 0 elsewhere. This penalises
+        # false positives on unselected tokens, which the previous
+        # self-referential top-k-only loss could not do.
+        obj_target = torch.zeros_like(obj_scores)
+
         selected_classes = []
         selected_bboxes = []
-        selected_obj = []
-        
-        for b in range(B):
-            k = num_valid[b].item()
+
+        for b in range(batch_size):
+            k = int(num_valid[b].item())
             if k == 0:
                 continue
-            # Top-k predictions by objectness
-            topk_scores, topk_indices = torch.topk(obj_scores[b], k=k, dim=0)
+            _, topk_indices = torch.topk(obj_scores[b].detach(), k=k, dim=0)
+            obj_target[b, topk_indices] = 1.0
             selected_classes.append(class_logits[b, topk_indices])  # (k, num_classes)
             selected_bboxes.append(bbox_preds[b, topk_indices])   # (k, 4)
-            selected_obj.append(obj_scores[b, topk_indices])        # (k,)
-        
+
+        # Objectness loss covers the full grid so non-selected tokens learn 0.
+        obj_loss = nn_functional.binary_cross_entropy_with_logits(
+            obj_scores, obj_target, reduction="mean"
+        )
+
         if len(selected_classes) == 0:
-            # No valid targets — return zero loss
-            return torch.tensor(0.0, device=class_logits.device, requires_grad=True)
-        
+            # No valid targets — only objectness signal applies.
+            return obj_loss
+
         # Concatenate selected predictions
         pred_classes = torch.cat(selected_classes, dim=0)  # (sum(k), num_classes)
         pred_bboxes = torch.cat(selected_bboxes, dim=0)    # (sum(k), 4)
-        pred_obj = torch.cat(selected_obj, dim=0)          # (sum(k),)
-        
+
         # Filter valid targets (remove padding)
         valid_targets_classes = target_classes[valid_mask]  # (sum(k),)
         valid_targets_bboxes = target_bboxes[valid_mask]    # (sum(k), 4)
-        valid_targets_obj = target_obj[valid_mask]          # (sum(k),)
-        
-        # Compute losses on matched pairs
+
         cls_loss = nn_functional.cross_entropy(
             pred_classes,
             valid_targets_classes,
             reduction="mean",
         )
-        
         bbox_loss = nn_functional.smooth_l1_loss(
             pred_bboxes, valid_targets_bboxes, reduction="mean"
         )
-        
-        obj_loss = nn_functional.binary_cross_entropy_with_logits(
-            pred_obj, valid_targets_obj.float(), reduction="mean"
-        )
-        
+
         return cls_loss + bbox_loss + obj_loss
 
     def train_step(self, batch: dict[str, Any]) -> dict[str, float]:
@@ -328,13 +350,17 @@ class DetectionTrainer(nn.Module):
         targets = batch["targets"]
         self.optimizer.zero_grad()
 
-        if self.mixed_precision and self.scaler is not None:
+        if self.mixed_precision:
             with torch.autocast(device_type=x.device.type):
                 class_logits, bbox_preds, obj_logits = self.forward(x)
                 loss = self.compute_loss(class_logits, bbox_preds, obj_logits, targets)
-            self.scaler.scale(loss).backward()
-            self.scaler.step(self.optimizer)
-            self.scaler.update()
+            if self.scaler is not None:
+                self.scaler.scale(loss).backward()
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
+            else:
+                loss.backward()
+                self.optimizer.step()
         else:
             class_logits, bbox_preds, obj_logits = self.forward(x)
             loss = self.compute_loss(class_logits, bbox_preds, obj_logits, targets)
@@ -370,6 +396,9 @@ class KeypointTrainer(nn.Module):
         lr: float = 1e-4,
         weight_decay: float = 1e-4,
         scheduler_name: str = "cosine",
+        scheduler_t_max: int = 100,
+        scheduler_step_size: int = 30,
+        scheduler_gamma: float = 0.1,
         mixed_precision: bool = False,
     ) -> None:
         super().__init__()
@@ -377,6 +406,9 @@ class KeypointTrainer(nn.Module):
         self.head = KeypointHead(encoder.embed_dim, num_keypoints)
         self.num_keypoints = num_keypoints
         self.mixed_precision = mixed_precision
+        self.scheduler_t_max: int = scheduler_t_max
+        self.scheduler_step_size: int = scheduler_step_size
+        self.scheduler_gamma: float = scheduler_gamma
         self._device = next(encoder.parameters()).device
 
         if pretrained_path is not None:
@@ -384,11 +416,7 @@ class KeypointTrainer(nn.Module):
 
         self.optimizer = self._build_optimizer(optimizer_name, lr, weight_decay)
         self.scheduler = self._build_scheduler(scheduler_name)
-        self.scaler = (
-            torch.amp.GradScaler("cuda")
-            if mixed_precision and torch.cuda.is_available()
-            else None
-        )
+        self.scaler = _build_grad_scaler(mixed_precision)
 
     def _load_pretrained(self, path: str) -> None:
         state = torch.load(path, map_location=self._device, weights_only=True)
@@ -410,10 +438,14 @@ class KeypointTrainer(nn.Module):
 
     def _build_scheduler(self, name: str) -> Any:
         if name == "cosine":
-            return torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=100)
+            return torch.optim.lr_scheduler.CosineAnnealingLR(
+                self.optimizer, T_max=self.scheduler_t_max
+            )
         if name == "step":
             return torch.optim.lr_scheduler.StepLR(
-                self.optimizer, step_size=30, gamma=0.1
+                self.optimizer,
+                step_size=self.scheduler_step_size,
+                gamma=self.scheduler_gamma,
             )
         if name == "none" or name is None:
             return None
@@ -456,13 +488,17 @@ class KeypointTrainer(nn.Module):
         targets = batch["keypoints"]
         self.optimizer.zero_grad()
 
-        if self.mixed_precision and self.scaler is not None:
+        if self.mixed_precision:
             with torch.autocast(device_type=x.device.type):
                 preds = self.forward(x)
                 loss = self.compute_loss(preds, targets)
-            self.scaler.scale(loss).backward()
-            self.scaler.step(self.optimizer)
-            self.scaler.update()
+            if self.scaler is not None:
+                self.scaler.scale(loss).backward()
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
+            else:
+                loss.backward()
+                self.optimizer.step()
         else:
             preds = self.forward(x)
             loss = self.compute_loss(preds, targets)

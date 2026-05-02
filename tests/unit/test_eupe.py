@@ -132,6 +132,29 @@ class TestSegmentationHead:
         out = head(x, image_size=(300, 400))
         assert out.shape == (1, 3, 300, 400)
 
+    @pytest.mark.parametrize(
+        "image_size, patch_size",
+        [
+            ((224, 448), 16),
+            ((448, 224), 16),
+            ((128, 256), 16),
+        ],
+    )
+    def test_non_square_token_grid(
+        self, image_size: tuple[int, int], patch_size: int
+    ) -> None:
+        """Head must derive (h_patches, w_patches) from image_size, not sqrt(N)."""
+        embed_dim = 64
+        num_classes = 4
+        h, w = image_size
+        h_patches = h // patch_size
+        w_patches = w // patch_size
+        tokens = h_patches * w_patches
+        head = SegmentationHead(embed_dim, num_classes, patch_size)
+        x = torch.randn(1, tokens, embed_dim)
+        out = head(x, image_size=image_size)
+        assert out.shape == (1, num_classes, h, w)
+
 
 class TestDetectionHead:
     """Unit tests for DetectionHead."""
