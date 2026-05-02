@@ -1,0 +1,55 @@
+name: "Lumen"
+version: "0.1.0"
+description: "Scientific Image Self-Supervised Learning Framework"
+
+# EUPE 编码器配置
+eupe:
+  img_size: 224
+  patch_size: 16
+  in_chans: 1          # 科学图像通常是单通道
+  embed_dim: 384       # 紧凑模型
+  depth: 12
+  num_heads: 6
+  mlp_ratio: 4.0
+  drop_rate: 0.1
+  attn_drop_rate: 0.0
+
+# 自监督预训练配置
+pretrain:
+  strategy: "mae_contrastive"   # mae | contrastive | mae_contrastive
+  mask_ratio: 0.75
+  temperature: 0.2
+  projection_dim: 128
+
+# 下游任务配置
+downstream:
+  segmentation:
+    decoder: "upernet"
+    num_classes: 8
+  detection:
+    backbone: "eupe"
+    neck: "fpn"
+  keypoint:
+    num_keypoints: 100
+
+# 训练配置
+training:
+  batch_size: 32
+  epochs: 100
+  lr: 1e-4
+  weight_decay: 0.05
+  warmup_epochs: 10
+  optimizer: "adamw"
+  scheduler: "cosine"
+
+# 数据配置
+data:
+  root: "./data"
+  num_workers: 8
+  augment:
+    - "random_crop"
+    - "random_flip"
+    - "normalize"
+
+# 设备配置
+device: "auto"   # auto | cpu | cuda | mps
