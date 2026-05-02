@@ -253,17 +253,66 @@ class DetectionTrainer(nn.Module):
         target_bboxes = targets["bboxes"]
         target_obj = targets.get("objectness", torch.ones_like(target_classes))
 
+        # DetectionHead outputs (B, N, num_classes), (B, N, 4), (B, N, 1)
+        # where N = number of patches (e.g. 14x14 = 196)
+        # Targets are (B, max_objects) with padding by -1
+        # We need to match predictions to targets via Hungarian matching or simple assignment
+        # For simplicity, take top-k predictions where k = number of valid objects
+        
+        # Count valid objects per image
+        valid_mask = (target_classes != -1)  # (B, max_objects)
+        num_valid = valid_mask.sum(dim=1)  # (B,)
+        
+        B = class_logits.shape[0]
+        N = class_logits.shape[1]
+        
+        # For each image, select top-num_valid predictions by objectness score
+        # objectness_logits: (B, N, 1) -> squeeze to (B, N)
+        obj_scores = objectness_logits.squeeze(-1)  # (B, N)
+        
+        selected_classes = []
+        selected_bboxes = []
+        selected_obj = []
+        
+        for b in range(B):
+            k = num_valid[b].item()
+            if k == 0:
+                continue
+            # Top-k predictions by objectness
+            topk_scores, topk_indices = torch.topk(obj_scores[b], k=k, dim=0)
+            selected_classes.append(class_logits[b, topk_indices])  # (k, num_classes)
+            selected_bboxes.append(bbox_preds[b, topk_indices])   # (k, 4)
+            selected_obj.append(obj_scores[b, topk_indices])        # (k,)
+        
+        if len(selected_classes) == 0:
+            # No valid targets — return zero loss
+            return torch.tensor(0.0, device=class_logits.device, requires_grad=True)
+        
+        # Concatenate selected predictions
+        pred_classes = torch.cat(selected_classes, dim=0)  # (sum(k), num_classes)
+        pred_bboxes = torch.cat(selected_bboxes, dim=0)    # (sum(k), 4)
+        pred_obj = torch.cat(selected_obj, dim=0)          # (sum(k),)
+        
+        # Filter valid targets (remove padding)
+        valid_targets_classes = target_classes[valid_mask]  # (sum(k),)
+        valid_targets_bboxes = target_bboxes[valid_mask]    # (sum(k), 4)
+        valid_targets_obj = target_obj[valid_mask]          # (sum(k),)
+        
+        # Compute losses on matched pairs
         cls_loss = nn_functional.cross_entropy(
-            class_logits.view(-1, class_logits.shape[-1]),
-            target_classes.view(-1),
+            pred_classes,
+            valid_targets_classes,
             reduction="mean",
         )
+        
         bbox_loss = nn_functional.smooth_l1_loss(
-            bbox_preds.view(-1, 4), target_bboxes.view(-1, 4), reduction="mean"
+            pred_bboxes, valid_targets_bboxes, reduction="mean"
         )
+        
         obj_loss = nn_functional.binary_cross_entropy_with_logits(
-            objectness_logits.view(-1), target_obj.view(-1).float(), reduction="mean"
+            pred_obj, valid_targets_obj.float(), reduction="mean"
         )
+        
         return cls_loss + bbox_loss + obj_loss
 
     def train_step(self, batch: dict[str, Any]) -> dict[str, float]:
