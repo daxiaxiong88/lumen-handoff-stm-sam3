@@ -9,9 +9,13 @@ from lumen.models import (
     EncoderBase,
     EncoderProtocol,
     EUPEEncoder,
+    SegmenterProtocol,
     build_encoder,
+    build_segmenter,
     list_encoders,
+    list_segmenters,
     register_encoder,
+    register_segmenter,
 )
 from lumen.training import (
     ContrastiveTrainer,
@@ -60,6 +64,34 @@ class TestEncoderRegistry:
 
         encoder = build_encoder("__test_dummy__", embed_dim=16)
         assert encoder.embed_dim == 16
+
+
+class TestSegmenterRegistry:
+    """Verify the parallel segmenter registry surface."""
+
+    def test_sam3_is_registered(self) -> None:
+        assert "sam3" in list_segmenters()
+
+    def test_build_unknown_raises(self) -> None:
+        with pytest.raises(KeyError, match="Unknown segmenter"):
+            build_segmenter("does-not-exist")
+
+    def test_register_segmenter_overwrites(self) -> None:
+        class _Fake:
+            image_size = (1, 1)
+            supports_text_prompts = False
+            supports_box_prompts = False
+            supports_point_prompts = False
+
+            def predict(self, *_: object, **__: object) -> object:
+                return None
+
+        @register_segmenter("__test_segmenter__")
+        def _make() -> _Fake:
+            return _Fake()
+
+        seg = build_segmenter("__test_segmenter__")
+        assert isinstance(seg, SegmenterProtocol)
 
 
 class TestRegistryEncoderInTrainers:

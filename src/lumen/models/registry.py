@@ -1,15 +1,25 @@
-"""Name-based encoder factory.
+"""Name-based factories for the Lumen model zoo.
 
-Lets ``configs/default.yaml`` select a backbone by name without
-importing the encoder class:
+Two parallel registries are exposed:
 
-    from lumen.models import build_encoder
-    encoder = build_encoder("eupe", embed_dim=384, depth=12)
+* **Encoders** — backbones that return ``(B, N, D)`` patch tokens and
+  satisfy :class:`EncoderProtocol`. Used by every Lumen trainer.
+* **Segmenters** — promptable mask-producing models that satisfy
+  :class:`SegmenterProtocol`. Used as zero-shot tools and (later) for
+  fine-tuning via :class:`SegmenterTrainer`.
+
+Both surfaces share the same ``register_X`` / ``build_X`` /
+``list_Xs`` shape so a config can flip backbones AND segmenters by
+name with no import-time coupling:
+
+    from lumen.models import build_encoder, build_segmenter
+    encoder   = build_encoder("eupe", embed_dim=384, depth=12)
+    segmenter = build_segmenter("sam3")
 
 Encoders register themselves at import time via the
-:func:`register_encoder` decorator, so a registry entry exists for every
-encoder that has been imported. See :mod:`lumen.models.eupe` and
-:mod:`lumen.models.dinov3` for the canonical examples.
+:func:`register_encoder` decorator (see :mod:`lumen.models.eupe` and
+:mod:`lumen.models.dinov3`); segmenters do the same via
+:func:`register_segmenter` (see :mod:`lumen.models.sam3`).
 """
 
 from __future__ import annotations
@@ -17,10 +27,18 @@ from __future__ import annotations
 from typing import Callable
 
 from lumen.models.encoder_base import EncoderProtocol
+from lumen.models.segmenter_base import SegmenterProtocol
 
 EncoderFactory = Callable[..., EncoderProtocol]
+SegmenterFactory = Callable[..., SegmenterProtocol]
 
-_REGISTRY: dict[str, EncoderFactory] = {}
+_ENCODERS: dict[str, EncoderFactory] = {}
+_SEGMENTERS: dict[str, SegmenterFactory] = {}
+
+
+# ---------------------------------------------------------------------------
+# Encoders
+# ---------------------------------------------------------------------------
 
 
 def register_encoder(name: str) -> Callable[[EncoderFactory], EncoderFactory]:
@@ -39,7 +57,7 @@ def register_encoder(name: str) -> Callable[[EncoderFactory], EncoderFactory]:
     """
 
     def deco(factory: EncoderFactory) -> EncoderFactory:
-        _REGISTRY[name] = factory
+        _ENCODERS[name] = factory
         return factory
 
     return deco
@@ -47,16 +65,58 @@ def register_encoder(name: str) -> Callable[[EncoderFactory], EncoderFactory]:
 
 def build_encoder(name: str, **kwargs: object) -> EncoderProtocol:
     """Instantiate the registered encoder ``name`` with ``kwargs``."""
-    if name not in _REGISTRY:
+    if name not in _ENCODERS:
         raise KeyError(
-            f"Unknown encoder {name!r}; available: {sorted(_REGISTRY)}"
+            f"Unknown encoder {name!r}; available: {sorted(_ENCODERS)}"
         )
-    return _REGISTRY[name](**kwargs)
+    return _ENCODERS[name](**kwargs)
 
 
 def list_encoders() -> list[str]:
     """Return the names of every registered encoder, sorted."""
-    return sorted(_REGISTRY)
+    return sorted(_ENCODERS)
 
 
-__all__ = ["build_encoder", "list_encoders", "register_encoder"]
+# ---------------------------------------------------------------------------
+# Segmenters
+# ---------------------------------------------------------------------------
+
+
+def register_segmenter(
+    name: str,
+) -> Callable[[SegmenterFactory], SegmenterFactory]:
+    """Register a segmenter factory under ``name``.
+
+    Same shape as :func:`register_encoder` — wrap a callable that
+    returns a :class:`SegmenterProtocol`-compatible instance.
+    """
+
+    def deco(factory: SegmenterFactory) -> SegmenterFactory:
+        _SEGMENTERS[name] = factory
+        return factory
+
+    return deco
+
+
+def build_segmenter(name: str, **kwargs: object) -> SegmenterProtocol:
+    """Instantiate the registered segmenter ``name`` with ``kwargs``."""
+    if name not in _SEGMENTERS:
+        raise KeyError(
+            f"Unknown segmenter {name!r}; available: {sorted(_SEGMENTERS)}"
+        )
+    return _SEGMENTERS[name](**kwargs)
+
+
+def list_segmenters() -> list[str]:
+    """Return the names of every registered segmenter, sorted."""
+    return sorted(_SEGMENTERS)
+
+
+__all__ = [
+    "build_encoder",
+    "build_segmenter",
+    "list_encoders",
+    "list_segmenters",
+    "register_encoder",
+    "register_segmenter",
+]
