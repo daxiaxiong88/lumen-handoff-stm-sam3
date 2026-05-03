@@ -245,14 +245,13 @@ class Sam3Segmenter(SegmenterBase):
 
         outputs = self.model(**inputs)
 
-        # The processor exposes task-specific post-processors; instance
-        # segmentation gives us per-mask boxes + scores + labels in one shot.
-        post_inputs = {
-            "outputs": outputs,
-            "original_sizes": original_sizes,
-            "target_sizes": original_sizes,
-        }
-        results = self.processor.post_process_instance_segmentation(**post_inputs)
+        # The processor's instance-segmentation post-processor takes
+        # (outputs, threshold, mask_threshold, target_sizes); resize
+        # masks back to the original image size for the user.
+        results = self.processor.post_process_instance_segmentation(
+            outputs=outputs,
+            target_sizes=original_sizes,
+        )
         return self._results_to_detections(results, image_size=(h, w))
 
     def _to_rgb_uint8(self, image: torch.Tensor | np.ndarray) -> np.ndarray:
