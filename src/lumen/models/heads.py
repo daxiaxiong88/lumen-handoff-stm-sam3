@@ -7,6 +7,37 @@ import torch.nn.functional as nn_functional
 from lumen.models.registry import register_head
 
 
+class ResizeConvBlock(nn.Module):
+    """Upsample with interpolation followed by convolution.
+
+    This avoids the uneven-overlap checkerboard artifacts that can appear
+    with transposed convolutions in dense segmentation outputs.
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        *,
+        activate: bool,
+    ) -> None:
+        super().__init__()
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
+        self.norm = nn.BatchNorm2d(out_channels) if activate else nn.Identity()
+        self.act = nn.ReLU(inplace=True) if activate else nn.Identity()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = nn_functional.interpolate(
+            x,
+            scale_factor=2,
+            mode="bilinear",
+            align_corners=False,
+        )
+        x = self.conv(x)
+        x = self.norm(x)
+        return self.act(x)
+
+
 class SegmentationHead(nn.Module):
     """UPerNet-style segmentation head.
 
@@ -40,20 +71,10 @@ class SegmentationHead(nn.Module):
         for i in range(num_upsample_blocks):
             out_ch = embed_dim if i < num_upsample_blocks - 1 else num_classes
             upsample_layers.append(
-                nn.Sequential(
-                    nn.ConvTranspose2d(
-                        in_ch, out_ch, kernel_size=4, stride=2, padding=1
-                    ),
-                    (
-                        nn.BatchNorm2d(out_ch)
-                        if i < num_upsample_blocks - 1
-                        else nn.Identity()
-                    ),
-                    (
-                        nn.ReLU(inplace=True)
-                        if i < num_upsample_blocks - 1
-                        else nn.Identity()
-                    ),
+                ResizeConvBlock(
+                    in_ch,
+                    out_ch,
+                    activate=i < num_upsample_blocks - 1,
                 )
             )
             in_ch = out_ch
