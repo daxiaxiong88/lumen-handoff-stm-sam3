@@ -11,8 +11,11 @@ from lumen.models import (
     EUPEEncoder,
     SegmenterProtocol,
     build_encoder,
+    build_head,
     build_segmenter,
+    build_task_model,
     list_encoders,
+    list_heads,
     list_segmenters,
     register_encoder,
     register_segmenter,
@@ -92,6 +95,42 @@ class TestSegmenterRegistry:
 
         seg = build_segmenter("__test_segmenter__")
         assert isinstance(seg, SegmenterProtocol)
+
+
+class TestHeadRegistry:
+    """Verify registered downstream heads and task-model assembly."""
+
+    def test_builtin_heads_are_registered(self) -> None:
+        assert {"segmentation", "upernet", "detection", "keypoint"}.issubset(
+            set(list_heads())
+        )
+
+    def test_build_segmentation_head(self) -> None:
+        head = build_head(
+            "segmentation",
+            embed_dim=32,
+            num_classes=3,
+            patch_size=16,
+        )
+        tokens = torch.randn(1, 16, 32)
+        logits = head(tokens, image_size=(64, 64))
+        assert logits.shape == (1, 3, 64, 64)
+
+    def test_build_task_model(self) -> None:
+        encoder = build_encoder("eupe", embed_dim=64, depth=2, num_heads=4)
+        model = build_task_model(encoder, task="segmentation", num_classes=2)
+        logits = model(torch.randn(1, 1, 64, 64))
+        assert isinstance(logits, torch.Tensor)
+        assert logits.shape == (1, 2, 64, 64)
+
+    def test_task_model_head_only_groups_freeze_encoder(self) -> None:
+        encoder = build_encoder("eupe", embed_dim=64, depth=2, num_heads=4)
+        model = build_task_model(encoder, task="segmentation", num_classes=2)
+        groups = model.parameter_groups(trainability="head_only", head_lr=1e-3)
+        assert len(groups) == 1
+        assert groups[0]["name"] == "head"
+        assert all(not param.requires_grad for param in model.encoder.parameters())
+        assert all(param.requires_grad for param in model.head.parameters())
 
 
 class TestRegistryEncoderInTrainers:
@@ -174,9 +213,7 @@ class TestUnifiedTrainEpoch:
         assert isinstance(metrics["loss"], float)
         assert metrics["loss"] >= 0.0
 
-    def test_mae_trainer_via_train_epoch(
-        self, tiny_encoder: EUPEEncoder
-    ) -> None:
+    def test_mae_trainer_via_train_epoch(self, tiny_encoder: EUPEEncoder) -> None:
         """External-optimizer trainer: caller passes optimizer."""
         trainer = MAETrainer(tiny_encoder, mask_ratio=0.5)
         optimizer = torch.optim.AdamW(trainer.parameters(), lr=1e-4)

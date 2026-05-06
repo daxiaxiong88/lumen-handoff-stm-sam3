@@ -5,6 +5,7 @@ import torch
 
 from lumen.models import EUPEEncoder
 from lumen.training import ContrastiveTrainer, HybridTrainer, MAETrainer
+from lumen.training.stages import OptimizerStageConfig, StageRunner, TrainingStageConfig
 from lumen.training.workflow import (
     move_batch_to_device,
     train_fine_tune_epoch,
@@ -69,6 +70,7 @@ class TestMAETrainer:
         assert out["pred"].shape == (2, num_patches, patch_pixels)
         assert out["mask"].shape == (2, num_patches)
         assert out["target"].shape == (2, num_patches, patch_pixels)
+        assert trainer.masking_mode == "encoder_masked"
 
     def test_mae_train_step(self, tiny_encoder: EUPEEncoder) -> None:
         """MAE train_step returns a scalar loss."""
@@ -257,6 +259,40 @@ class TestWorkflowHelpers:
         batch = {"image": torch.randn(2, 1, 64, 64)}
         metrics = train_self_supervised_epoch(trainer, [batch], optimizer)
         assert metrics["loss"] >= 0.0
+
+    def test_ssl_trainer_can_own_optimizer(self, tiny_encoder: EUPEEncoder) -> None:
+        trainer = MAETrainer(
+            tiny_encoder,
+            mask_ratio=0.5,
+            decoder_embed_dim=64,
+            decoder_depth=1,
+            decoder_num_heads=4,
+            lr=1e-4,
+        )
+        batch = {"image": torch.randn(2, 1, 64, 64)}
+        metrics = trainer.train_step(batch)
+        assert isinstance(metrics["loss"], float)
+
+    def test_stage_runner_runs_external_optimizer_ssl(
+        self, tiny_encoder: EUPEEncoder
+    ) -> None:
+        trainer = MAETrainer(
+            tiny_encoder,
+            mask_ratio=0.5,
+            decoder_embed_dim=64,
+            decoder_depth=1,
+            decoder_num_heads=4,
+        )
+        stage = TrainingStageConfig(
+            name="ssl_pretrain",
+            trainer="mae",
+            epochs=1,
+            optimizer=OptimizerStageConfig(lr=1e-4),
+        )
+        batch = {"image": torch.randn(2, 1, 64, 64)}
+        history = StageRunner().run_stage(trainer, [batch], stage)
+        assert len(history) == 1
+        assert history[0]["loss"] >= 0.0
 
     def test_fine_tune_epoch_runs(self, tiny_encoder: EUPEEncoder) -> None:
         from lumen.training import SegmentationTrainer

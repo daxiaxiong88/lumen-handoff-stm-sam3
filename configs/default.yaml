@@ -42,6 +42,39 @@ training:
   optimizer: "adamw"
   scheduler: "cosine"
 
+# 阶段式训练流水线，可覆盖传统 training/pretrain/downstream 配置
+pipeline:
+  stages:
+    - name: "ssl_pretrain"
+      trainer: "hybrid"
+      epochs: 100
+      trainability: "encoder_and_head"
+      optimizer:
+        name: "AdamW"
+        lr: 1.0e-4
+        weight_decay: 0.05
+    - name: "head_train"
+      trainer: "segmentation"
+      task: "segmentation"
+      epochs: 30
+      trainability: "head_only"
+      optimizer:
+        name: "AdamW"
+        lr: 1.0e-3
+        head_lr: 1.0e-3
+        weight_decay: 1.0e-4
+    - name: "finetune"
+      trainer: "segmentation"
+      task: "segmentation"
+      epochs: 50
+      trainability: "encoder_and_head"
+      optimizer:
+        name: "AdamW"
+        lr: 1.0e-4
+        encoder_lr: 1.0e-5
+        head_lr: 1.0e-4
+        weight_decay: 1.0e-4
+
 # 数据配置
 data:
   root: "./data"

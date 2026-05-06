@@ -18,13 +18,14 @@ from lumen.training.incremental import (
     ReplayBuffer,
 )
 from lumen.training.mae import MAETrainer
+from lumen.training.stages import OptimizerStageConfig, StageRunner, TrainingStageConfig
+from lumen.training.trainer_base import TrainerProtocol
 from lumen.training.weak_supervision import (
     CoTeaching,
     MeanTeacher,
     PseudoLabeler,
     WeakSupervisionTrainer,
 )
-from lumen.training.trainer_base import TrainerProtocol
 from lumen.training.workflow import (
     move_batch_to_device,
     train_epoch,
@@ -50,7 +51,10 @@ __all__ = [
     "QueryStrategy",
     "ReplayBuffer",
     "SegmentationTrainer",
+    "OptimizerStageConfig",
+    "StageRunner",
     "TrainerProtocol",
+    "TrainingStageConfig",
     "UncertaintySampler",
     "WeakSupervisionTrainer",
     "move_batch_to_device",

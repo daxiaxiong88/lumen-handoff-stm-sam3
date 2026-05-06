@@ -35,9 +35,7 @@ def _repo_root_from_here() -> Path:
 def _ensure_vendor_on_path(vendor_dir: str | Path | None = None) -> Path:
     repo_root = _repo_root_from_here()
     vendor_path = (
-        Path(vendor_dir)
-        if vendor_dir is not None
-        else repo_root / "vandor" / "EUPE"
+        Path(vendor_dir) if vendor_dir is not None else repo_root / "vandor" / "EUPE"
     )
     if not vendor_path.exists():
         raise FileNotFoundError(f"Vendor EUPE directory does not exist: {vendor_path}")
@@ -88,6 +86,7 @@ class EUPEEncoder(EncoderBase):
         self.img_size = img_size
         self.n_storage_tokens = n_storage_tokens
         self.mask_k_bias = mask_k_bias
+        self.supports_masked_tokens = True
         self.auto_convert_input_channels = auto_convert_input_channels
 
         self.model = DinoVisionTransformer(
@@ -125,8 +124,8 @@ class EUPEEncoder(EncoderBase):
         """Official vendor transformer blocks."""
         return self.model.blocks
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Return official EUPE normalized patch tokens."""
+    def preprocess(self, x: torch.Tensor) -> torch.Tensor:
+        """Adapt scientific image channels to the configured EUPE input."""
         if x.dim() != 4:
             raise ValueError(f"Expected 4-D input (B, C, H, W), got {x.dim()}-D tensor")
         if self.auto_convert_input_channels and self.in_channels == 3:
@@ -138,7 +137,20 @@ class EUPEEncoder(EncoderBase):
             raise ValueError(
                 f"Expected {self.in_channels} input channel(s), got {x.shape[1]}"
             )
+        return x
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Return official EUPE normalized patch tokens."""
+        x = self.preprocess(x)
         features = self.model.forward_features(x)
+        return features["x_norm_patchtokens"]
+
+    def forward_masked_tokens(
+        self, x: torch.Tensor, mask: torch.Tensor
+    ) -> torch.Tensor:
+        """Return EUPE patch tokens after replacing masked patches in-encoder."""
+        x = self.preprocess(x)
+        features = self.model.forward_features(x, masks=mask)
         return features["x_norm_patchtokens"]
 
     def get_config(self) -> EUPEConfig:
@@ -167,7 +179,9 @@ class EUPEEncoder(EncoderBase):
     ) -> EUPEEncoder:
         """Load an official EUPE checkpoint into the vendor architecture."""
         target_device = torch.device("cpu" if device is None else device)
-        state = torch.load(checkpoint_path, map_location=target_device, weights_only=True)
+        state = torch.load(
+            checkpoint_path, map_location=target_device, weights_only=True
+        )
         if any(k.startswith("teacher.") for k in state):
             state = {
                 k.removeprefix("teacher."): v
@@ -226,7 +240,9 @@ def load_vendor_eupe_encoder(
     }
     if variant not in names:
         raise ValueError(f"Unknown EUPE variant: {variant!r}")
-    ckpt_path = Path(weights_path) if weights_path else repo_root / "weights" / names[variant]
+    ckpt_path = (
+        Path(weights_path) if weights_path else repo_root / "weights" / names[variant]
+    )
     encoder = EUPEEncoder.from_pretrained(
         ckpt_path,
         device=device,

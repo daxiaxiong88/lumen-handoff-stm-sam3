@@ -40,4 +40,22 @@ class TrainerProtocol(Protocol):
     def train_step(self, batch: dict[str, Any]) -> dict[str, Any]: ...
 
 
-__all__ = ["TrainerProtocol"]
+def build_optimizer(
+    params: Any,
+    *,
+    name: str = "AdamW",
+    lr: float = 1e-4,
+    weight_decay: float = 1e-4,
+) -> torch.optim.Optimizer:
+    """Build a standard optimizer used across Lumen trainers."""
+    normalized = name.lower()
+    if normalized == "adamw":
+        return torch.optim.AdamW(params, lr=lr, weight_decay=weight_decay)
+    if normalized == "adam":
+        return torch.optim.Adam(params, lr=lr, weight_decay=weight_decay)
+    if normalized == "sgd":
+        return torch.optim.SGD(params, lr=lr, momentum=0.9, weight_decay=weight_decay)
+    raise ValueError(f"Unknown optimizer: {name!r}")
+
+
+__all__ = ["TrainerProtocol", "build_optimizer"]

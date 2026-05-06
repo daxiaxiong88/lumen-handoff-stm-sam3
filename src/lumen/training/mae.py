@@ -8,6 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as nn_functional
 
 from lumen.models.encoder_base import EncoderProtocol
+from lumen.training.trainer_base import build_optimizer
 
 
 class MAEDecoder(nn.Module):
@@ -126,11 +127,13 @@ class MAEDecoder(nn.Module):
 
 
 class MAETrainer(nn.Module):
-    """Masked Autoencoder (MAE) self-supervised trainer.
+    """Masked-reconstruction self-supervised trainer.
 
-    Randomly masks image patches, feeds only visible patches through the
-    encoder, and reconstructs the full image via a lightweight decoder.
-    Loss is computed only on the masked patches.
+    Randomly masks image patches and reconstructs the full image via a
+    lightweight decoder. Encoders that expose ``forward_masked_tokens`` hide
+    masked patches inside the backbone; other encoders fall back to
+    post-encoder masking for broad model-zoo compatibility. Loss is computed
+    only on the masked patches.
 
     Args:
         encoder: EncoderProtocol instance.
@@ -153,6 +156,10 @@ class MAETrainer(nn.Module):
         decoder_embed_dim: int = 256,
         decoder_depth: int = 4,
         decoder_num_heads: int = 8,
+        optimizer: torch.optim.Optimizer | None = None,
+        optimizer_name: str = "AdamW",
+        lr: float | None = None,
+        weight_decay: float = 1e-4,
     ) -> None:
         super().__init__()
         self.encoder = encoder
@@ -168,6 +175,21 @@ class MAETrainer(nn.Module):
             )
         else:
             self.decoder = decoder
+        self.optimizer = optimizer
+        if self.optimizer is None and lr is not None:
+            self.optimizer = build_optimizer(
+                self.parameters(),
+                name=optimizer_name,
+                lr=lr,
+                weight_decay=weight_decay,
+            )
+        self.scheduler = None
+        self.scaler = None
+        self.masking_mode = (
+            "encoder_masked"
+            if getattr(encoder, "supports_masked_tokens", False)
+            else "post_encoder"
+        )
 
     def random_mask(
         self, batch_size: int, num_patches: int, device: torch.device
@@ -254,10 +276,10 @@ class MAETrainer(nn.Module):
         target = self.patchify(x)
         mask = self.random_mask(batch_size, num_patches, x.device)
 
-        # Encode full image (encoder sees all patches; we mask after)
-        # For true MAE efficiency, we could feed only unmasked patches.
-        # Here we keep it simple: run full encoder then drop masked tokens.
-        latent = self.encoder(x)  # (B, N, embed_dim)
+        if getattr(self.encoder, "supports_masked_tokens", False):
+            latent = self.encoder.forward_masked_tokens(x, mask)
+        else:
+            latent = self.encoder(x)
         visible = (~mask).unsqueeze(-1).expand_as(latent)
         latent_visible = latent[visible].reshape(batch_size, -1, latent.shape[-1])
 
@@ -292,7 +314,7 @@ class MAETrainer(nn.Module):
         loss = (loss * mask.float()).sum() / mask.sum()
         return loss
 
-    def train_step(self, batch: dict[str, Any]) -> dict[str, torch.Tensor]:
+    def train_step(self, batch: dict[str, Any]) -> dict[str, torch.Tensor | float]:
         """Single training step returning loss and metrics.
 
         Args:
@@ -304,4 +326,12 @@ class MAETrainer(nn.Module):
         """
         x = batch["image"]
         out = self.forward(x)
+        if self.optimizer is not None:
+            self.optimizer.zero_grad(set_to_none=True)
+            out["loss"].backward()
+            self.optimizer.step()
+            return {
+                "loss": float(out["loss"].detach()),
+                "mae_loss": float(out["loss"].detach()),
+            }
         return {"loss": out["loss"], "mae_loss": out["loss"]}

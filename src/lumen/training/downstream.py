@@ -8,6 +8,7 @@ import torch.nn.functional as nn_functional
 
 from lumen.models.encoder_base import EncoderProtocol
 from lumen.models.heads import DetectionHead, KeypointHead, SegmentationHead
+from lumen.models.task_model import Trainability, split_encoder_head_parameters
 
 
 def _build_grad_scaler(mixed_precision: bool) -> Any:
@@ -21,6 +22,25 @@ def _build_grad_scaler(mixed_precision: bool) -> Any:
     if not mixed_precision or not torch.cuda.is_available():
         return None
     return torch.amp.GradScaler("cuda")  # type: ignore[attr-defined]
+
+
+def _build_optimizer_from_groups(
+    name: str,
+    param_groups: list[dict[str, object]],
+    lr: float,
+    weight_decay: float,
+) -> torch.optim.Optimizer:
+    """Build an optimizer from staged parameter groups."""
+    normalized = name.lower()
+    if normalized == "adamw":
+        return torch.optim.AdamW(param_groups, lr=lr, weight_decay=weight_decay)
+    if normalized == "adam":
+        return torch.optim.Adam(param_groups, lr=lr, weight_decay=weight_decay)
+    if normalized == "sgd":
+        return torch.optim.SGD(
+            param_groups, lr=lr, momentum=0.9, weight_decay=weight_decay
+        )
+    raise ValueError(f"Unknown optimizer: {name!r}")
 
 
 class SegmentationTrainer(nn.Module):
@@ -50,6 +70,9 @@ class SegmentationTrainer(nn.Module):
         scheduler_step_size: int = 30,
         scheduler_gamma: float = 0.1,
         mixed_precision: bool = False,
+        trainability: Trainability = "encoder_and_head",
+        encoder_lr: float | None = None,
+        head_lr: float | None = None,
     ) -> None:
         super().__init__()
         self.encoder = encoder
@@ -59,6 +82,9 @@ class SegmentationTrainer(nn.Module):
         self.scheduler_t_max: int = scheduler_t_max
         self.scheduler_step_size: int = scheduler_step_size
         self.scheduler_gamma: float = scheduler_gamma
+        self.trainability = trainability
+        self.encoder_lr = lr if encoder_lr is None else encoder_lr
+        self.head_lr = lr if head_lr is None else head_lr
         self._device = next(encoder.parameters()).device
 
         if pretrained_path is not None:
@@ -77,16 +103,15 @@ class SegmentationTrainer(nn.Module):
         self, name: str, lr: float, weight_decay: float
     ) -> torch.optim.Optimizer:
         """Build optimizer for encoder + head parameters."""
-        params = list(self.encoder.parameters()) + list(self.head.parameters())
-        if name == "AdamW":
-            return torch.optim.AdamW(params, lr=lr, weight_decay=weight_decay)
-        if name == "Adam":
-            return torch.optim.Adam(params, lr=lr, weight_decay=weight_decay)
-        if name == "SGD":
-            return torch.optim.SGD(
-                params, lr=lr, momentum=0.9, weight_decay=weight_decay
-            )
-        raise ValueError(f"Unknown optimizer: {name!r}")
+        param_groups = split_encoder_head_parameters(
+            self.encoder,
+            self.head,
+            trainability=self.trainability,
+            encoder_lr=self.encoder_lr,
+            head_lr=self.head_lr,
+            weight_decay=weight_decay,
+        )
+        return _build_optimizer_from_groups(name, param_groups, lr, weight_decay)
 
     def _build_scheduler(self, name: str) -> Any:
         """Build LR scheduler."""
@@ -194,6 +219,9 @@ class DetectionTrainer(nn.Module):
         scheduler_step_size: int = 30,
         scheduler_gamma: float = 0.1,
         mixed_precision: bool = False,
+        trainability: Trainability = "encoder_and_head",
+        encoder_lr: float | None = None,
+        head_lr: float | None = None,
     ) -> None:
         super().__init__()
         self.encoder = encoder
@@ -203,6 +231,9 @@ class DetectionTrainer(nn.Module):
         self.scheduler_t_max: int = scheduler_t_max
         self.scheduler_step_size: int = scheduler_step_size
         self.scheduler_gamma: float = scheduler_gamma
+        self.trainability = trainability
+        self.encoder_lr = lr if encoder_lr is None else encoder_lr
+        self.head_lr = lr if head_lr is None else head_lr
         self._device = next(encoder.parameters()).device
 
         if pretrained_path is not None:
@@ -219,16 +250,15 @@ class DetectionTrainer(nn.Module):
     def _build_optimizer(
         self, name: str, lr: float, weight_decay: float
     ) -> torch.optim.Optimizer:
-        params = list(self.encoder.parameters()) + list(self.head.parameters())
-        if name == "AdamW":
-            return torch.optim.AdamW(params, lr=lr, weight_decay=weight_decay)
-        if name == "Adam":
-            return torch.optim.Adam(params, lr=lr, weight_decay=weight_decay)
-        if name == "SGD":
-            return torch.optim.SGD(
-                params, lr=lr, momentum=0.9, weight_decay=weight_decay
-            )
-        raise ValueError(f"Unknown optimizer: {name!r}")
+        param_groups = split_encoder_head_parameters(
+            self.encoder,
+            self.head,
+            trainability=self.trainability,
+            encoder_lr=self.encoder_lr,
+            head_lr=self.head_lr,
+            weight_decay=weight_decay,
+        )
+        return _build_optimizer_from_groups(name, param_groups, lr, weight_decay)
 
     def _build_scheduler(self, name: str) -> Any:
         if name == "cosine":
@@ -284,7 +314,7 @@ class DetectionTrainer(nn.Module):
         # DetectionHead outputs (B, N, num_classes), (B, N, 4), (B, N, 1)
         # where N = number of patches (e.g. 14x14 = 196).
         # Targets are (B, max_objects) padded with class_id == -1.
-        valid_mask = (target_classes != -1)  # (B, max_objects)
+        valid_mask = target_classes != -1  # (B, max_objects)
         num_valid = valid_mask.sum(dim=1)  # (B,)
 
         # For each image, select top-num_valid predictions by objectness.
@@ -307,7 +337,7 @@ class DetectionTrainer(nn.Module):
             _, topk_indices = torch.topk(obj_scores[b].detach(), k=k, dim=0)
             obj_target[b, topk_indices] = 1.0
             selected_classes.append(class_logits[b, topk_indices])  # (k, num_classes)
-            selected_bboxes.append(bbox_preds[b, topk_indices])   # (k, 4)
+            selected_bboxes.append(bbox_preds[b, topk_indices])  # (k, 4)
 
         # Objectness loss covers the full grid so non-selected tokens learn 0.
         obj_loss = nn_functional.binary_cross_entropy_with_logits(
@@ -320,11 +350,11 @@ class DetectionTrainer(nn.Module):
 
         # Concatenate selected predictions
         pred_classes = torch.cat(selected_classes, dim=0)  # (sum(k), num_classes)
-        pred_bboxes = torch.cat(selected_bboxes, dim=0)    # (sum(k), 4)
+        pred_bboxes = torch.cat(selected_bboxes, dim=0)  # (sum(k), 4)
 
         # Filter valid targets (remove padding)
         valid_targets_classes = target_classes[valid_mask]  # (sum(k),)
-        valid_targets_bboxes = target_bboxes[valid_mask]    # (sum(k), 4)
+        valid_targets_bboxes = target_bboxes[valid_mask]  # (sum(k), 4)
 
         cls_loss = nn_functional.cross_entropy(
             pred_classes,
@@ -400,6 +430,9 @@ class KeypointTrainer(nn.Module):
         scheduler_step_size: int = 30,
         scheduler_gamma: float = 0.1,
         mixed_precision: bool = False,
+        trainability: Trainability = "encoder_and_head",
+        encoder_lr: float | None = None,
+        head_lr: float | None = None,
     ) -> None:
         super().__init__()
         self.encoder = encoder
@@ -409,6 +442,9 @@ class KeypointTrainer(nn.Module):
         self.scheduler_t_max: int = scheduler_t_max
         self.scheduler_step_size: int = scheduler_step_size
         self.scheduler_gamma: float = scheduler_gamma
+        self.trainability = trainability
+        self.encoder_lr = lr if encoder_lr is None else encoder_lr
+        self.head_lr = lr if head_lr is None else head_lr
         self._device = next(encoder.parameters()).device
 
         if pretrained_path is not None:
@@ -425,16 +461,15 @@ class KeypointTrainer(nn.Module):
     def _build_optimizer(
         self, name: str, lr: float, weight_decay: float
     ) -> torch.optim.Optimizer:
-        params = list(self.encoder.parameters()) + list(self.head.parameters())
-        if name == "AdamW":
-            return torch.optim.AdamW(params, lr=lr, weight_decay=weight_decay)
-        if name == "Adam":
-            return torch.optim.Adam(params, lr=lr, weight_decay=weight_decay)
-        if name == "SGD":
-            return torch.optim.SGD(
-                params, lr=lr, momentum=0.9, weight_decay=weight_decay
-            )
-        raise ValueError(f"Unknown optimizer: {name!r}")
+        param_groups = split_encoder_head_parameters(
+            self.encoder,
+            self.head,
+            trainability=self.trainability,
+            encoder_lr=self.encoder_lr,
+            head_lr=self.head_lr,
+            weight_decay=weight_decay,
+        )
+        return _build_optimizer_from_groups(name, param_groups, lr, weight_decay)
 
     def _build_scheduler(self, name: str) -> Any:
         if name == "cosine":

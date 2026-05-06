@@ -98,6 +98,35 @@ class TestSegmentationTrainer:
         assert isinstance(trainer.optimizer, torch.optim.SGD)
         assert isinstance(trainer.scheduler, torch.optim.lr_scheduler.StepLR)
 
+    def test_head_only_trainability_freezes_encoder(
+        self, tiny_encoder: EUPEEncoder
+    ) -> None:
+        trainer = SegmentationTrainer(
+            tiny_encoder,
+            num_classes=2,
+            scheduler_name="none",
+            trainability="head_only",
+            head_lr=1e-3,
+        )
+        assert all(not param.requires_grad for param in trainer.encoder.parameters())
+        assert all(param.requires_grad for param in trainer.head.parameters())
+        assert len(trainer.optimizer.param_groups) == 1
+        assert trainer.optimizer.param_groups[0]["lr"] == pytest.approx(1e-3)
+
+    def test_finetune_uses_separate_encoder_head_lrs(
+        self, tiny_encoder: EUPEEncoder
+    ) -> None:
+        trainer = SegmentationTrainer(
+            tiny_encoder,
+            num_classes=2,
+            scheduler_name="none",
+            trainability="encoder_and_head",
+            encoder_lr=1e-5,
+            head_lr=1e-4,
+        )
+        lrs = sorted(group["lr"] for group in trainer.optimizer.param_groups)
+        assert lrs == pytest.approx([1e-5, 1e-4])
+
 
 class TestDetectionTrainer:
     """Unit tests for DetectionTrainer."""
@@ -280,6 +309,33 @@ class TestConfig:
         finally:
             os.unlink(path)
 
+    def test_load_pipeline_stages(self) -> None:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as fh:
+            yaml.dump(
+                {
+                    "pipeline": {
+                        "stages": [
+                            {
+                                "name": "head_train",
+                                "trainer": "segmentation",
+                                "epochs": 2,
+                                "trainability": "head_only",
+                                "optimizer": {"lr": 1e-3, "head_lr": 1e-3},
+                            }
+                        ]
+                    }
+                },
+                fh,
+            )
+            path = fh.name
+        try:
+            cfg = load_config(path)
+            assert cfg.pipeline.stages[0].name == "head_train"
+            assert cfg.pipeline.stages[0].trainability == "head_only"
+            assert cfg.pipeline.stages[0].optimizer.head_lr == pytest.approx(1e-3)
+        finally:
+            os.unlink(path)
+
     def test_config_get(self) -> None:
         """Dot-path get works."""
         cfg = LumenConfig()
@@ -345,9 +401,7 @@ class TestConfig:
         finally:
             os.unlink(path)
 
-    def test_downstream_env_override(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_downstream_env_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Env overrides reach nested downstream configs."""
         monkeypatch.setenv("LUMEN__DOWNSTREAM__SEGMENTATION__NUM_CLASSES", "12")
         monkeypatch.setenv("LUMEN__DOWNSTREAM__KEYPOINT__NUM_KEYPOINTS", "21")
@@ -420,9 +474,7 @@ class TestLogging:
         val_loss = reloaded.metric_series("loss", phase="val")
         assert val_loss == pytest.approx([1.4])
 
-    def test_model_version_stable_across_runs(
-        self, tiny_encoder: EUPEEncoder
-    ) -> None:
+    def test_model_version_stable_across_runs(self, tiny_encoder: EUPEEncoder) -> None:
         """model_version is stable for a fixed architecture."""
         v1 = model_version(tiny_encoder)
         v2 = model_version(tiny_encoder)

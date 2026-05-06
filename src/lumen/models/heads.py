@@ -4,6 +4,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as nn_functional
 
+from lumen.models.registry import register_head
+
 
 class SegmentationHead(nn.Module):
     """UPerNet-style segmentation head.
@@ -187,3 +189,37 @@ class KeypointHead(nn.Module):
         x = x.mean(dim=1)  # (B, embed_dim)
         coords = self.head(x)  # (B, num_keypoints * 2)
         return coords.view(batch_size, self.num_keypoints, 2)
+
+
+@register_head("segmentation")
+@register_head("upernet")
+def _build_segmentation_head(
+    embed_dim: int,
+    num_classes: int,
+    patch_size: int = 16,
+    num_upsample_blocks: int = 4,
+) -> SegmentationHead:
+    return SegmentationHead(
+        embed_dim=embed_dim,
+        num_classes=num_classes,
+        patch_size=patch_size,
+        num_upsample_blocks=num_upsample_blocks,
+    )
+
+
+@register_head("detection")
+def _build_detection_head(
+    embed_dim: int,
+    num_classes: int,
+    patch_size: int = 16,
+) -> DetectionHead:
+    return DetectionHead(
+        embed_dim=embed_dim,
+        num_classes=num_classes,
+        patch_size=patch_size,
+    )
+
+
+@register_head("keypoint")
+def _build_keypoint_head(embed_dim: int, num_keypoints: int) -> KeypointHead:
+    return KeypointHead(embed_dim=embed_dim, num_keypoints=num_keypoints)

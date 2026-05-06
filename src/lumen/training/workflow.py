@@ -7,7 +7,9 @@ import torch
 import torch.nn as nn
 
 
-def move_batch_to_device(batch: dict[str, Any], device: torch.device | str) -> dict[str, Any]:
+def move_batch_to_device(
+    batch: dict[str, Any], device: torch.device | str
+) -> dict[str, Any]:
     """Move tensor values in a training batch to ``device``."""
     target = torch.device(device)
     moved: dict[str, Any] = {}
@@ -16,7 +18,9 @@ def move_batch_to_device(batch: dict[str, Any], device: torch.device | str) -> d
             moved[key] = value.to(target)
         elif isinstance(value, dict):
             moved[key] = {
-                sub_key: sub_value.to(target) if torch.is_tensor(sub_value) else sub_value
+                sub_key: (
+                    sub_value.to(target) if torch.is_tensor(sub_value) else sub_value
+                )
                 for sub_key, sub_value in value.items()
             }
         else:
@@ -27,10 +31,7 @@ def move_batch_to_device(batch: dict[str, Any], device: torch.device | str) -> d
 def _accumulate(totals: dict[str, float], metrics: dict[str, Any]) -> None:
     """Add a single train_step's metrics into a running average buffer."""
     for key, value in metrics.items():
-        if torch.is_tensor(value):
-            scalar = float(value.detach())
-        else:
-            scalar = float(value)
+        scalar = float(value.detach()) if torch.is_tensor(value) else float(value)
         totals[key] = totals.get(key, 0.0) + scalar
 
 

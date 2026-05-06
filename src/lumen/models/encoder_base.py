@@ -35,8 +35,19 @@ class EncoderProtocol(Protocol):
     embed_dim: int
     patch_size: int
     in_channels: int
+    supports_masked_tokens: bool
 
     def __call__(self, x: torch.Tensor) -> torch.Tensor: ...
+
+    def preprocess(self, x: torch.Tensor) -> torch.Tensor: ...
+
+    def forward_tokens(self, x: torch.Tensor) -> torch.Tensor: ...
+
+    def token_grid(self, image_size: tuple[int, int]) -> tuple[int, int]: ...
+
+    def forward_masked_tokens(
+        self, x: torch.Tensor, mask: torch.Tensor
+    ) -> torch.Tensor: ...
 
 
 class EncoderBase(nn.Module):
@@ -49,6 +60,27 @@ class EncoderBase(nn.Module):
     embed_dim: int
     patch_size: int
     in_channels: int
+    supports_masked_tokens: bool = False
+
+    def preprocess(self, x: torch.Tensor) -> torch.Tensor:
+        """Apply model-specific input adaptation before token extraction."""
+        return x
+
+    def forward_tokens(self, x: torch.Tensor) -> torch.Tensor:
+        """Return patch tokens after model-specific preprocessing."""
+        return self.forward(self.preprocess(x))
+
+    def token_grid(self, image_size: tuple[int, int]) -> tuple[int, int]:
+        """Infer the patch-token grid produced for ``image_size``."""
+        height, width = image_size
+        return height // self.patch_size, width // self.patch_size
+
+    def forward_masked_tokens(
+        self, x: torch.Tensor, mask: torch.Tensor
+    ) -> torch.Tensor:
+        """Return patch tokens with masked positions hidden from the encoder."""
+        del x, mask
+        raise NotImplementedError("This encoder does not support masked tokens")
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:  # pragma: no cover
         del x

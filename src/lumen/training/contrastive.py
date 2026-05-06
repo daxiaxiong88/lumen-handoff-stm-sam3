@@ -8,6 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as nn_functional
 
 from lumen.models.encoder_base import EncoderProtocol
+from lumen.training.trainer_base import build_optimizer
 
 
 class ProjectionHead(nn.Module):
@@ -197,6 +198,10 @@ class ContrastiveTrainer(nn.Module):
         augmentations: nn.Module | None = None,
         temperature: float = 0.5,
         pool: str = "mean",
+        optimizer: torch.optim.Optimizer | None = None,
+        optimizer_name: str = "AdamW",
+        lr: float | None = None,
+        weight_decay: float = 1e-4,
     ) -> None:
         super().__init__()
         self.encoder = encoder
@@ -218,6 +223,16 @@ class ContrastiveTrainer(nn.Module):
             self.augmentations = ScientificAugmentations()
         else:
             self.augmentations = augmentations
+        self.optimizer = optimizer
+        if self.optimizer is None and lr is not None:
+            self.optimizer = build_optimizer(
+                self.parameters(),
+                name=optimizer_name,
+                lr=lr,
+                weight_decay=weight_decay,
+            )
+        self.scheduler = None
+        self.scaler = None
 
     def _pool_features(self, x: torch.Tensor) -> torch.Tensor:
         """Pool encoder patch tokens to a single feature vector.
@@ -271,7 +286,7 @@ class ContrastiveTrainer(nn.Module):
         loss = nt_xent_loss(z1, z2, self.temperature)
         return {"loss": loss, "z1": z1, "z2": z2}
 
-    def train_step(self, batch: dict[str, Any]) -> dict[str, torch.Tensor]:
+    def train_step(self, batch: dict[str, Any]) -> dict[str, torch.Tensor | float]:
         """Single training step returning loss and metrics.
 
         Args:
@@ -283,4 +298,10 @@ class ContrastiveTrainer(nn.Module):
         """
         x = batch["image"]
         out = self.forward(x)
+        if self.optimizer is not None:
+            self.optimizer.zero_grad(set_to_none=True)
+            out["loss"].backward()
+            self.optimizer.step()
+            loss_value = float(out["loss"].detach())
+            return {"loss": loss_value, "contrastive_loss": loss_value}
         return {"loss": out["loss"], "contrastive_loss": out["loss"]}

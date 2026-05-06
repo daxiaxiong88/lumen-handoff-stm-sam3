@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as nn_functional
 
 from lumen.models.encoder_base import EncoderBase
@@ -46,14 +45,44 @@ class DINOv3Encoder(EncoderBase):
         self.patch_size = int(self.model.config.patch_size)
         self.in_channels = int(self.model.config.num_channels)
         self.embed_dim = int(self.model.config.hidden_size)
-        self.num_register_tokens = int(getattr(self.model.config, "num_register_tokens", 0))
+        self.num_register_tokens = int(
+            getattr(self.model.config, "num_register_tokens", 0)
+        )
         self.normalize = normalize
+        self.supports_masked_tokens = False
         self.auto_convert_input_channels = auto_convert_input_channels
 
-        mean = torch.tensor(self.processor.image_mean, dtype=torch.float32).view(1, -1, 1, 1)
-        std = torch.tensor(self.processor.image_std, dtype=torch.float32).view(1, -1, 1, 1)
+        mean = torch.tensor(self.processor.image_mean, dtype=torch.float32).view(
+            1, -1, 1, 1
+        )
+        std = torch.tensor(self.processor.image_std, dtype=torch.float32).view(
+            1, -1, 1, 1
+        )
         self.register_buffer("image_mean", mean, persistent=False)
         self.register_buffer("image_std", std, persistent=False)
+
+    def preprocess(self, x: torch.Tensor) -> torch.Tensor:
+        """Apply DINOv3 channel adaptation, cropping, and normalization."""
+        if x.dim() != 4:
+            raise ValueError(f"Expected 4-D input (B, C, H, W), got {x.dim()}-D tensor")
+        if self.auto_convert_input_channels and self.in_channels == 3:
+            if x.shape[1] == 1:
+                x = x.repeat(1, 3, 1, 1)
+            elif x.shape[1] == 4:
+                x = x[:, :3]
+        if x.shape[1] != self.in_channels:
+            raise ValueError(
+                f"Expected {self.in_channels} channel(s), got {x.shape[1]}"
+            )
+
+        x = x.float()
+        x = self._crop_to_patch_multiple(x)
+        if self.normalize:
+            mean = self.get_buffer("image_mean").to(x.device)
+            std = self.get_buffer("image_std").to(x.device)
+            x = (x - mean) / std
+
+        return x
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Return DINOv3 normalized patch tokens shaped ``(B, N, D)``.
@@ -63,26 +92,15 @@ class DINOv3Encoder(EncoderBase):
         the call site in ``torch.inference_mode()`` themselves (see
         :class:`lumen.models.FewShotFeatureMatcher` for an example).
         """
-        if x.dim() != 4:
-            raise ValueError(f"Expected 4-D input (B, C, H, W), got {x.dim()}-D tensor")
-        if self.auto_convert_input_channels and self.in_channels == 3:
-            if x.shape[1] == 1:
-                x = x.repeat(1, 3, 1, 1)
-            elif x.shape[1] == 4:
-                x = x[:, :3]
-        if x.shape[1] != self.in_channels:
-            raise ValueError(f"Expected {self.in_channels} channel(s), got {x.shape[1]}")
-
-        x = x.float()
-        x = self._crop_to_patch_multiple(x)
-        if self.normalize:
-            mean = self.get_buffer("image_mean").to(x.device)
-            std = self.get_buffer("image_std").to(x.device)
-            x = (x - mean) / std
-
+        x = self.preprocess(x)
         outputs = self.model(pixel_values=x)
         first_patch = 1 + self.num_register_tokens
         return outputs.last_hidden_state[:, first_patch:, :]
+
+    def token_grid(self, image_size: tuple[int, int]) -> tuple[int, int]:
+        """Infer DINOv3's cropped patch-token grid for ``image_size``."""
+        height, width = image_size
+        return height // self.patch_size, width // self.patch_size
 
     def _crop_to_patch_multiple(self, x: torch.Tensor) -> torch.Tensor:
         height = (x.shape[-2] // self.patch_size) * self.patch_size

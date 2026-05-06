@@ -3,7 +3,7 @@ from __future__ import annotations
 import copy
 import os
 from dataclasses import dataclass, field, fields, is_dataclass
-from typing import Any
+from typing import Any, get_args, get_origin, get_type_hints
 
 import yaml
 
@@ -95,9 +95,7 @@ class DownstreamConfig:
     detection: DetectionDownstreamConfig = field(
         default_factory=DetectionDownstreamConfig
     )
-    keypoint: KeypointDownstreamConfig = field(
-        default_factory=KeypointDownstreamConfig
-    )
+    keypoint: KeypointDownstreamConfig = field(default_factory=KeypointDownstreamConfig)
 
 
 @dataclass
@@ -115,6 +113,36 @@ class TrainingConfig:
     pretrained_path: str | None = None
     num_classes: int = 10
     num_keypoints: int = 17
+
+
+@dataclass
+class OptimizerConfig:
+    """Optimizer settings for one pipeline stage."""
+
+    name: str = "AdamW"
+    lr: float = 1e-4
+    weight_decay: float = 1e-4
+    encoder_lr: float | None = None
+    head_lr: float | None = None
+
+
+@dataclass
+class PipelineStageConfig:
+    """One declarative training stage."""
+
+    name: str = "stage"
+    trainer: str = "segmentation"
+    task: str | None = None
+    epochs: int = 1
+    trainability: str = "encoder_and_head"
+    optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
+
+
+@dataclass
+class PipelineConfig:
+    """Stage-based training pipeline configuration."""
+
+    stages: list[PipelineStageConfig] = field(default_factory=list)
 
 
 @dataclass
@@ -158,6 +186,7 @@ class LumenConfig:
     pretrain: PretrainConfig = field(default_factory=PretrainConfig)
     downstream: DownstreamConfig = field(default_factory=DownstreamConfig)
     training: TrainingConfig = field(default_factory=TrainingConfig)
+    pipeline: PipelineConfig = field(default_factory=PipelineConfig)
     data: DataConfig = field(default_factory=DataConfig)
 
     def get(self, path: str, default: Any = None) -> Any:
@@ -265,6 +294,22 @@ class LumenConfig:
                 f"pretrain.strategy must be one of 'mae', 'contrastive', "
                 f"'mae_contrastive'; got {self.pretrain.strategy!r}"
             )
+        valid_trainability = {
+            "frozen_encoder",
+            "head_only",
+            "encoder_and_head",
+            "full",
+        }
+        for stage in self.pipeline.stages:
+            if stage.epochs <= 0:
+                raise ValueError(
+                    f"pipeline stage {stage.name!r} epochs must be positive"
+                )
+            if stage.trainability not in valid_trainability:
+                raise ValueError(
+                    f"pipeline stage {stage.name!r} has invalid trainability "
+                    f"{stage.trainability!r}"
+                )
 
 
 def _merge_dict(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -286,13 +331,8 @@ def _dataclass_field_types(cls: type) -> dict[str, Any]:
     that aren't local dataclasses are returned as-is for the caller to
     treat as plain values.
     """
-    type_map: dict[str, Any] = {}
-    for f in fields(cls):
-        annot = f.type
-        if isinstance(annot, str):
-            annot = globals().get(annot, annot)
-        type_map[f.name] = annot
-    return type_map
+    hints = get_type_hints(cls)
+    return {f.name: hints.get(f.name, f.type) for f in fields(cls)}
 
 
 def _build_dataclass(cls: type, raw: Any) -> Any:
@@ -315,6 +355,16 @@ def _build_dataclass(cls: type, raw: Any) -> Any:
             and isinstance(value, dict)
         ):
             kwargs[key] = _build_dataclass(field_type, value)
+        elif get_origin(field_type) is list:
+            item_type = get_args(field_type)[0]
+            if (
+                isinstance(item_type, type)
+                and is_dataclass(item_type)
+                and isinstance(value, list)
+            ):
+                kwargs[key] = [_build_dataclass(item_type, item) for item in value]
+            else:
+                kwargs[key] = value
         else:
             kwargs[key] = value
     return cls(**kwargs)
@@ -345,9 +395,7 @@ def load_config(path: str) -> LumenConfig:
     with open(path) as fh:
         user = yaml.safe_load(fh) or {}
     if not isinstance(user, dict):
-        raise ValueError(
-            f"Config root must be a mapping, got {type(user).__name__}"
-        )
+        raise ValueError(f"Config root must be a mapping, got {type(user).__name__}")
     cfg = _dict_to_config(user)
     cfg.validate()
     return cfg

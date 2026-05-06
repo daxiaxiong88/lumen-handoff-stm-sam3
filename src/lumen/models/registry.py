@@ -26,14 +26,18 @@ from __future__ import annotations
 
 from typing import Callable
 
+import torch.nn as nn
+
 from lumen.models.encoder_base import EncoderProtocol
 from lumen.models.segmenter_base import SegmenterProtocol
 
 EncoderFactory = Callable[..., EncoderProtocol]
 SegmenterFactory = Callable[..., SegmenterProtocol]
+HeadFactory = Callable[..., nn.Module]
 
 _ENCODERS: dict[str, EncoderFactory] = {}
 _SEGMENTERS: dict[str, SegmenterFactory] = {}
+_HEADS: dict[str, HeadFactory] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -66,9 +70,7 @@ def register_encoder(name: str) -> Callable[[EncoderFactory], EncoderFactory]:
 def build_encoder(name: str, **kwargs: object) -> EncoderProtocol:
     """Instantiate the registered encoder ``name`` with ``kwargs``."""
     if name not in _ENCODERS:
-        raise KeyError(
-            f"Unknown encoder {name!r}; available: {sorted(_ENCODERS)}"
-        )
+        raise KeyError(f"Unknown encoder {name!r}; available: {sorted(_ENCODERS)}")
     return _ENCODERS[name](**kwargs)
 
 
@@ -101,9 +103,7 @@ def register_segmenter(
 def build_segmenter(name: str, **kwargs: object) -> SegmenterProtocol:
     """Instantiate the registered segmenter ``name`` with ``kwargs``."""
     if name not in _SEGMENTERS:
-        raise KeyError(
-            f"Unknown segmenter {name!r}; available: {sorted(_SEGMENTERS)}"
-        )
+        raise KeyError(f"Unknown segmenter {name!r}; available: {sorted(_SEGMENTERS)}")
     return _SEGMENTERS[name](**kwargs)
 
 
@@ -112,11 +112,41 @@ def list_segmenters() -> list[str]:
     return sorted(_SEGMENTERS)
 
 
+# ---------------------------------------------------------------------------
+# Heads
+# ---------------------------------------------------------------------------
+
+
+def register_head(name: str) -> Callable[[HeadFactory], HeadFactory]:
+    """Register a downstream head factory under ``name``."""
+
+    def deco(factory: HeadFactory) -> HeadFactory:
+        _HEADS[name] = factory
+        return factory
+
+    return deco
+
+
+def build_head(name: str, **kwargs: object) -> nn.Module:
+    """Instantiate the registered head ``name`` with ``kwargs``."""
+    if name not in _HEADS:
+        raise KeyError(f"Unknown head {name!r}; available: {sorted(_HEADS)}")
+    return _HEADS[name](**kwargs)
+
+
+def list_heads() -> list[str]:
+    """Return the names of every registered head, sorted."""
+    return sorted(_HEADS)
+
+
 __all__ = [
     "build_encoder",
+    "build_head",
     "build_segmenter",
     "list_encoders",
+    "list_heads",
     "list_segmenters",
     "register_encoder",
+    "register_head",
     "register_segmenter",
 ]

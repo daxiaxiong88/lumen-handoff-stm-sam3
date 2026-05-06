@@ -8,6 +8,7 @@ import torch.nn as nn
 from lumen.models.encoder_base import EncoderProtocol
 from lumen.training.contrastive import ContrastiveTrainer
 from lumen.training.mae import MAEDecoder, MAETrainer
+from lumen.training.trainer_base import build_optimizer
 
 
 class HybridTrainer(nn.Module):
@@ -42,6 +43,10 @@ class HybridTrainer(nn.Module):
         lambda_mae: float = 1.0,
         lambda_contrast: float = 0.1,
         pool: str = "mean",
+        optimizer: torch.optim.Optimizer | None = None,
+        optimizer_name: str = "AdamW",
+        lr: float | None = None,
+        weight_decay: float = 1e-4,
     ) -> None:
         super().__init__()
         self.encoder = encoder
@@ -60,6 +65,16 @@ class HybridTrainer(nn.Module):
             temperature=temperature,
             pool=pool,
         )
+        self.optimizer = optimizer
+        if self.optimizer is None and lr is not None:
+            self.optimizer = build_optimizer(
+                self.parameters(),
+                name=optimizer_name,
+                lr=lr,
+                weight_decay=weight_decay,
+            )
+        self.scheduler = None
+        self.scaler = None
 
     def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
         """Forward pass for hybrid pretraining.
@@ -96,7 +111,7 @@ class HybridTrainer(nn.Module):
             "z2": contrast_out["z2"],
         }
 
-    def train_step(self, batch: dict[str, Any]) -> dict[str, torch.Tensor]:
+    def train_step(self, batch: dict[str, Any]) -> dict[str, torch.Tensor | float]:
         """Single training step returning combined loss and metrics.
 
         Args:
@@ -109,6 +124,15 @@ class HybridTrainer(nn.Module):
         """
         x = batch["image"]
         out = self.forward(x)
+        if self.optimizer is not None:
+            self.optimizer.zero_grad(set_to_none=True)
+            out["loss"].backward()
+            self.optimizer.step()
+            return {
+                "loss": float(out["loss"].detach()),
+                "mae_loss": float(out["mae_loss"].detach()),
+                "contrastive_loss": float(out["contrastive_loss"].detach()),
+            }
         return {
             "loss": out["loss"],
             "mae_loss": out["mae_loss"],
