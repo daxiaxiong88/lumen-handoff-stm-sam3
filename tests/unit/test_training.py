@@ -5,6 +5,7 @@ import torch
 
 from lumen.models import EUPEEncoder
 from lumen.training import ContrastiveTrainer, HybridTrainer, MAETrainer
+from lumen.training.downstream import SegmentationTrainer
 from lumen.training.stages import OptimizerStageConfig, StageRunner, TrainingStageConfig
 from lumen.training.workflow import (
     move_batch_to_device,
@@ -294,9 +295,68 @@ class TestWorkflowHelpers:
         assert len(history) == 1
         assert history[0]["loss"] >= 0.0
 
-    def test_fine_tune_epoch_runs(self, tiny_encoder: EUPEEncoder) -> None:
-        from lumen.training import SegmentationTrainer
+    def test_stage_runner_applies_head_only_trainability(
+        self, tiny_encoder: EUPEEncoder
+    ) -> None:
+        trainer = SegmentationTrainer(
+            tiny_encoder,
+            num_classes=2,
+            scheduler_name="none",
+        )
+        stage = TrainingStageConfig(
+            name="fewshot_finetune",
+            trainer="segmentation",
+            epochs=1,
+            trainability="head_only",
+        )
+        batch = {
+            "image": torch.randn(2, 1, 64, 64),
+            "mask": torch.randint(0, 2, (2, 64, 64)),
+        }
 
+        history = StageRunner().run_stage(trainer, [batch], stage)
+
+        assert len(history) == 1
+        assert all(not param.requires_grad for param in trainer.encoder.parameters())
+        assert all(param.requires_grad for param in trainer.head.parameters())
+
+    def test_stage_runner_reenables_encoder_for_full_stage(
+        self, tiny_encoder: EUPEEncoder
+    ) -> None:
+        trainer = SegmentationTrainer(
+            tiny_encoder,
+            num_classes=2,
+            scheduler_name="none",
+        )
+        runner = StageRunner()
+        batch = {
+            "image": torch.randn(2, 1, 64, 64),
+            "mask": torch.randint(0, 2, (2, 64, 64)),
+        }
+
+        runner.run_stage(
+            trainer,
+            [batch],
+            TrainingStageConfig(
+                name="head_only",
+                trainer="segmentation",
+                trainability="head_only",
+            ),
+        )
+        runner.run_stage(
+            trainer,
+            [batch],
+            TrainingStageConfig(
+                name="full",
+                trainer="segmentation",
+                trainability="full",
+            ),
+        )
+
+        assert all(param.requires_grad for param in trainer.encoder.parameters())
+        assert all(param.requires_grad for param in trainer.head.parameters())
+
+    def test_fine_tune_epoch_runs(self, tiny_encoder: EUPEEncoder) -> None:
         trainer = SegmentationTrainer(
             tiny_encoder,
             num_classes=2,

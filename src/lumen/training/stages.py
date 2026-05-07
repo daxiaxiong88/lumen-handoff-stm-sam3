@@ -7,6 +7,7 @@ from typing import Any, Literal
 import torch
 import torch.nn as nn
 
+from lumen.models.task_model import Trainability, set_module_trainable
 from lumen.training.trainer_base import build_optimizer
 from lumen.training.workflow import train_epoch
 
@@ -52,6 +53,7 @@ class StageRunner:
         if stage.epochs <= 0:
             raise ValueError("stage.epochs must be positive")
 
+        self._apply_trainability(trainer, stage.trainability)
         optimizer = getattr(trainer, "optimizer", None)
         external_optimizer = None
         if optimizer is None:
@@ -72,6 +74,41 @@ class StageRunner:
             )
             history.append(metrics)
         return history
+
+    def _apply_trainability(
+        self,
+        trainer: nn.Module,
+        trainability: Trainability,
+    ) -> None:
+        """Apply the stage's encoder/head freezing policy in-place."""
+        if trainability not in {
+            "frozen_encoder",
+            "head_only",
+            "encoder_and_head",
+            "full",
+        }:
+            raise ValueError(f"Unknown trainability policy: {trainability!r}")
+
+        set_module_trainable(trainer, True)
+        if trainability in {"encoder_and_head", "full"}:
+            return
+
+        encoder = self._find_encoder(trainer)
+        if encoder is not None:
+            set_module_trainable(encoder, False)
+
+    def _find_encoder(self, trainer: nn.Module) -> nn.Module | None:
+        """Find the shared encoder on common Lumen trainer/model shapes."""
+        encoder = getattr(trainer, "encoder", None)
+        if isinstance(encoder, nn.Module):
+            return encoder
+
+        model = getattr(trainer, "model", None)
+        model_encoder = getattr(model, "encoder", None)
+        if isinstance(model_encoder, nn.Module):
+            return model_encoder
+
+        return None
 
     def run_pipeline(
         self,
