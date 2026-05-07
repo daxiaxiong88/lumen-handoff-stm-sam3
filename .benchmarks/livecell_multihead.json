@@ -1,0 +1,13 @@
+{
+  "dataset": "LiveCELL",
+  "task": "segmentation",
+  "metric_name": "miou",
+  "baseline_metric": 0.31893997073294417,
+  "multihead_metric": 0.3764882796452597,
+  "fewshot_improvement": 0.18043617668887943,
+  "sequential_compute": 63.234158125007525,
+  "joint_compute": 33.685147167008836,
+  "efficiency_ratio": 0.5327049203441075,
+  "checkpoint_path": "weights/livecell/lumen_multihead.pt",
+  "passes": true
+}
