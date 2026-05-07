@@ -14,6 +14,7 @@ from lumen.training.contrastive import (
     ScientificAugmentations,
     nt_xent_loss,
 )
+from lumen.training.losses import SegmentationCriterion, SegmentationLossName
 from lumen.training.mae import MAEDecoder
 from lumen.training.trainer_base import build_optimizer
 
@@ -245,12 +246,22 @@ class MultiHeadMicroscopyTrainer(nn.Module):
         optimizer_name: str = "AdamW",
         lr: float = 1e-4,
         weight_decay: float = 1e-4,
+        segmentation_loss: SegmentationLossName = "ce",
+        segmentation_ce_weight: float = 1.0,
+        segmentation_dice_weight: float = 1.0,
+        include_background_in_dice: bool = False,
     ) -> None:
         super().__init__()
         self.model = model
         self.stop_gradient_heads = stop_gradient_heads or set()
         self.weak_supervision_alpha = weak_supervision_alpha
         self.balancer = balancer or FixedLossBalancer(loss_weights)
+        self.segmentation_criterion = SegmentationCriterion(
+            segmentation_loss,
+            ce_weight=segmentation_ce_weight,
+            dice_weight=segmentation_dice_weight,
+            include_background_in_dice=include_background_in_dice,
+        )
         self.optimizer = optimizer or build_optimizer(
             self.parameters(),
             name=optimizer_name,
@@ -279,7 +290,7 @@ class MultiHeadMicroscopyTrainer(nn.Module):
             masks = batch.get("mask")
             if masks is not None and "segmentation" in outputs:
                 logits = outputs["segmentation"]
-                losses["segmentation"] = nn_functional.cross_entropy(logits, masks)
+                losses["segmentation"] = self.segmentation_criterion(logits, masks)
 
         weak_image = batch.get("weak_image")
         if weak_image is not None and self.weak_supervision_alpha > 0:
@@ -300,7 +311,7 @@ class MultiHeadMicroscopyTrainer(nn.Module):
             if weak_mask is not None and "segmentation" in weak_outputs:
                 losses["weak_segmentation"] = (
                     self.weak_supervision_alpha
-                    * nn_functional.cross_entropy(
+                    * self.segmentation_criterion(
                         weak_outputs["segmentation"],
                         weak_mask,
                     )

@@ -79,6 +79,32 @@ class TestMultiHeadMicroscopyTrainer:
         )
         assert metrics["loss"] >= 0.0
 
+    def test_ce_dice_segmentation_loss_runs(
+        self,
+        tiny_encoder: EUPEEncoder,
+    ) -> None:
+        model = MultiHeadMicroscopyModel.with_default_heads(
+            tiny_encoder,
+            num_segmentation_classes=2,
+            use_contrastive=False,
+            use_mae=False,
+        )
+        trainer = MultiHeadMicroscopyTrainer(
+            model,
+            segmentation_loss="ce_dice",
+            lr=1e-4,
+        )
+        batch = {
+            "image": torch.randn(1, 1, 64, 64),
+            "mask": torch.zeros(1, 64, 64, dtype=torch.long),
+        }
+        batch["mask"][:, 20:44, 20:44] = 1
+
+        metrics = trainer.train_step(batch)
+
+        assert {"loss", "segmentation"}.issubset(metrics)
+        assert metrics["segmentation"] >= 0.0
+
     def test_mae_branch_runs(self, tiny_encoder: EUPEEncoder) -> None:
         model = MultiHeadMicroscopyModel.with_default_heads(
             tiny_encoder,

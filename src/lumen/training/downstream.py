@@ -9,6 +9,7 @@ import torch.nn.functional as nn_functional
 from lumen.models.encoder_base import EncoderProtocol
 from lumen.models.heads import DetectionHead, KeypointHead, SegmentationHead
 from lumen.models.task_model import Trainability, split_encoder_head_parameters
+from lumen.training.losses import SegmentationCriterion, SegmentationLossName
 
 
 def _build_grad_scaler(mixed_precision: bool) -> Any:
@@ -73,6 +74,10 @@ class SegmentationTrainer(nn.Module):
         trainability: Trainability = "encoder_and_head",
         encoder_lr: float | None = None,
         head_lr: float | None = None,
+        segmentation_loss: SegmentationLossName = "ce",
+        segmentation_ce_weight: float = 1.0,
+        segmentation_dice_weight: float = 1.0,
+        include_background_in_dice: bool = False,
     ) -> None:
         super().__init__()
         self.encoder = encoder
@@ -85,6 +90,12 @@ class SegmentationTrainer(nn.Module):
         self.trainability = trainability
         self.encoder_lr = lr if encoder_lr is None else encoder_lr
         self.head_lr = lr if head_lr is None else head_lr
+        self.criterion = SegmentationCriterion(
+            segmentation_loss,
+            ce_weight=segmentation_ce_weight,
+            dice_weight=segmentation_dice_weight,
+            include_background_in_dice=include_background_in_dice,
+        )
         self._device = next(encoder.parameters()).device
 
         if pretrained_path is not None:
@@ -142,7 +153,7 @@ class SegmentationTrainer(nn.Module):
         return self.head(feats, image_size=x.shape[2:])
 
     def compute_loss(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
-        """Cross-entropy segmentation loss.
+        """Segmentation loss.
 
         Args:
             logits: ``(B, num_classes, H, W)``.
@@ -151,7 +162,7 @@ class SegmentationTrainer(nn.Module):
         Returns:
             Scalar loss tensor.
         """
-        return nn_functional.cross_entropy(logits, targets)
+        return self.criterion(logits, targets)
 
     def train_step(self, batch: dict[str, Any]) -> dict[str, float]:
         """Single training step.

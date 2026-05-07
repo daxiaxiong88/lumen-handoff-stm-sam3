@@ -17,6 +17,7 @@ from lumen.training.incremental import (
     LwFRegularizer,
     ReplayBuffer,
 )
+from lumen.training.losses import SegmentationCriterion, soft_dice_loss
 from lumen.training.mae import MAETrainer
 from lumen.training.multihead import (
     FixedLossBalancer,
@@ -60,6 +61,7 @@ __all__ = [
     "PseudoLabeler",
     "QueryStrategy",
     "ReplayBuffer",
+    "SegmentationCriterion",
     "SegmentationTrainer",
     "OptimizerStageConfig",
     "StageRunner",
@@ -68,6 +70,7 @@ __all__ = [
     "UncertaintySampler",
     "WeakSupervisionTrainer",
     "move_batch_to_device",
+    "soft_dice_loss",
     "train_epoch",
     "train_fine_tune_epoch",
     "train_self_supervised_epoch",

@@ -50,6 +50,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-val-samples", type=int, default=None)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--ssl-weight", type=float, default=0.2)
+    parser.add_argument(
+        "--segmentation-loss",
+        choices=("ce", "dice", "ce_dice"),
+        default="ce_dice",
+        help="Supervised segmentation objective. ce_dice is recommended for sparse cell masks.",
+    )
+    parser.add_argument("--dice-weight", type=float, default=1.0)
     parser.add_argument("--device", default="auto")
     parser.add_argument("--output-checkpoint", required=True)
     parser.add_argument("--output-report", required=True)
@@ -74,6 +81,8 @@ def train_supervised_baseline(
     *,
     epochs: int,
     lr: float,
+    segmentation_loss: str,
+    dice_weight: float,
 ) -> tuple[MultiHeadMicroscopyModel, float]:
     model = MultiHeadMicroscopyModel.with_default_heads(
         encoder,
@@ -81,7 +90,12 @@ def train_supervised_baseline(
         use_contrastive=False,
         use_mae=False,
     ).to(device)
-    trainer = MultiHeadMicroscopyTrainer(model, lr=lr)
+    trainer = MultiHeadMicroscopyTrainer(
+        model,
+        lr=lr,
+        segmentation_loss=segmentation_loss,
+        segmentation_dice_weight=dice_weight,
+    )
     start = time.perf_counter()
     for _ in range(epochs):
         for batch in train_loader:
@@ -103,6 +117,8 @@ def train_multihead(
     epochs: int,
     lr: float,
     ssl_weight: float,
+    segmentation_loss: str,
+    dice_weight: float,
 ) -> tuple[MultiHeadMicroscopyModel, float]:
     model = MultiHeadMicroscopyModel.with_default_heads(
         encoder,
@@ -114,6 +130,8 @@ def train_multihead(
         model,
         loss_weights={"segmentation": 1.0, "contrastive": ssl_weight},
         lr=lr,
+        segmentation_loss=segmentation_loss,
+        segmentation_dice_weight=dice_weight,
     )
     start = time.perf_counter()
     for _ in range(epochs):
@@ -191,6 +209,8 @@ def main() -> None:
         device,
         epochs=args.epochs,
         lr=args.lr,
+        segmentation_loss=args.segmentation_loss,
+        dice_weight=args.dice_weight,
     )
     baseline_miou = evaluate_miou(
         baseline_model,
@@ -208,6 +228,8 @@ def main() -> None:
         epochs=args.epochs,
         lr=args.lr,
         ssl_weight=args.ssl_weight,
+        segmentation_loss=args.segmentation_loss,
+        dice_weight=args.dice_weight,
     )
     multihead_miou = evaluate_miou(
         multihead_model,

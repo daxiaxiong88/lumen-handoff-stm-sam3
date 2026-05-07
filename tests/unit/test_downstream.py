@@ -27,6 +27,7 @@ from lumen.training.eval import (
     rmse,
     top1_accuracy,
 )
+from lumen.training.losses import SegmentationCriterion, soft_dice_loss
 from lumen.utils.config import LumenConfig, load_config, load_config_from_env
 from lumen.utils.logging import (
     ExperimentLogger,
@@ -130,6 +131,47 @@ class TestSegmentationTrainer:
         )
         lrs = sorted(group["lr"] for group in trainer.optimizer.param_groups)
         assert lrs == pytest.approx([1e-5, 1e-4])
+
+    def test_ce_dice_loss_runs_on_sparse_foreground(
+        self, tiny_encoder: EUPEEncoder
+    ) -> None:
+        trainer = SegmentationTrainer(
+            tiny_encoder,
+            num_classes=2,
+            scheduler_name="none",
+            segmentation_loss="ce_dice",
+        )
+        batch = {
+            "image": torch.randn(1, 1, 64, 64),
+            "mask": torch.zeros(1, 64, 64, dtype=torch.long),
+        }
+        batch["mask"][:, 24:40, 24:40] = 1
+
+        metrics = trainer.train_step(batch)
+
+        assert metrics["loss"] >= 0.0
+
+    def test_soft_dice_rewards_foreground_overlap(self) -> None:
+        target = torch.zeros(1, 16, 16, dtype=torch.long)
+        target[:, 4:12, 4:12] = 1
+        good = torch.zeros(1, 2, 16, 16)
+        bad = torch.zeros(1, 2, 16, 16)
+        good[:, 1, 4:12, 4:12] = 5.0
+        good[:, 0] = -good[:, 1]
+        bad[:, 0] = 5.0
+        bad[:, 1] = -5.0
+
+        assert soft_dice_loss(good, target) < soft_dice_loss(bad, target)
+
+    def test_segmentation_criterion_combines_ce_and_dice(self) -> None:
+        criterion = SegmentationCriterion("ce_dice", dice_weight=0.5)
+        logits = torch.randn(1, 2, 16, 16)
+        target = torch.randint(0, 2, (1, 16, 16))
+
+        loss = criterion(logits, target)
+
+        assert loss.shape == ()
+        assert loss.item() >= 0.0
 
 
 class TestDetectionTrainer:
