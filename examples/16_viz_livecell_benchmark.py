@@ -44,14 +44,20 @@ def parse_args() -> argparse.Namespace:
         "--val-annotations",
         default="data/livecell/LIVECell_dataset_2021/annotations/LIVECell/livecell_coco_val.json",
     )
-    parser.add_argument("--image-size", type=int, default=64)
+    parser.add_argument(
+        "--image-size",
+        type=int,
+        default=256,
+        help="Resolution used for qualitative image, mask, and prediction panels.",
+    )
     parser.add_argument("--num-samples", type=int, default=4)
     parser.add_argument(
         "--scan-samples",
         type=int,
-        default=64,
+        default=16,
         help="Validation samples to scan before selecting qualitative examples.",
     )
+    parser.add_argument("--dpi", type=int, default=240)
     parser.add_argument("--output", default="examples/output_16_livecell_benchmark.png")
     return parser.parse_args()
 
@@ -182,7 +188,7 @@ def main() -> None:
     selected = select_samples(dataset, model, args.num_samples, args.scan_samples)
     n = len(selected)
 
-    fig = plt.figure(figsize=(12, 3.0 + 2.0 * n), constrained_layout=True)
+    fig = plt.figure(figsize=(16, 3.2 + 3.4 * n), constrained_layout=True)
     grid = fig.add_gridspec(n + 1, 4)
 
     ax_metric = fig.add_subplot(grid[0, 0:2])
@@ -210,6 +216,10 @@ def main() -> None:
     ax_compute.set_ylabel("seconds")
     ax_compute.set_title(f"Compute ratio: {benchmark['efficiency_ratio'] * 100:.1f}%")
     ax_compute.set_ylim(0, benchmark["sequential_compute"] * 1.2)
+    fig.suptitle(
+        f"LiveCELL benchmark comparison; qualitative panels resized to {args.image_size}px",
+        fontsize=14,
+    )
 
     column_titles = ["image", "GT", "multi-head pred", "GT + pred overlay"]
     for row, (idx, sample, pred, iou, pred_area) in enumerate(selected):
@@ -246,7 +256,7 @@ def main() -> None:
 
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(output, dpi=180)
+    fig.savefig(output, dpi=args.dpi)
     print(f"Saved {output}")
 
 
