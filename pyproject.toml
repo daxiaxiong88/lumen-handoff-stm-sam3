@@ -23,6 +23,7 @@ dependencies = [
     "scikit-image>=0.21",
     "einops>=0.7",
     "timm>=0.9",
+    "supervision>=0.28.0",
 ]
 
 [project.optional-dependencies]

@@ -1,155 +1,328 @@
-"""Science-aware augmentations for grayscale microscopy images.
+"""YOLO-style segmentation augmentation pipeline.
 
-These augmentations are designed for STEM / FIB / SEM data, where the
-physics of the imaging process imposes constraints that ordinary
-photographic augmentations violate (e.g. color jitter is meaningless on
-single-channel imagery; Poisson statistics dominate the noise model in
-electron-counting detectors).
+Code structure mirrors ultralytics/ultralytics's `data/augment.py`:
 
-The :class:`ScienceAugmentation` module is a stand-alone augmentation
-pipeline; the contrastive-learning module re-implements its own variant
-geared toward two-view diversity. Keeping the two implementations
-separate avoids cross-coupling but means improvements should be ported
-between them when relevant.
+  - `BaseTransform` defines the per-sample transform contract (`__call__(sample)
+    -> sample`), with separate hooks for image and label so subclasses only
+    override what they touch.
+  - `Compose` chains transforms with per-transform probability `p`.
+  - Photometric transforms (HSV-style intensity, gamma, Gaussian/Poisson
+    noise) only override `apply_image`.
+  - Geometric transforms (affine/scale/translate/flip/rot90) override both
+    `apply_image` and `apply_label` so masks stay aligned.
+
+`sample` is a dict with:
+  - "image": float tensor (C, H, W) in [0, 1]
+  - "label": long tensor (H, W) with `IGNORE_INDEX` for unknown pixels
+
+This module is dependency-free aside from torch — there is no albumentations
+fallback because the existing science-image augmentations need to act on
+single-channel imagery and synced int64 label maps, neither of which
+albumentations handles cleanly.
 """
 
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as nn_functional
 
+IGNORE_INDEX = -100
+Sample = dict[str, torch.Tensor]
 
-class ScienceAugmentation(nn.Module):
-    """Science-image-friendly augmentation pipeline.
 
-    Each augmentation has an independent application probability and is
-    safe for single-channel scientific images. No color jitter is
-    included.
+# ---------------------------------------------------------------------------
+# Base classes
+# ---------------------------------------------------------------------------
 
-    Args:
-        rotation_degrees: Maximum rotation angle (degrees). The rotation
-            preserves physical orientation in the sense that the angle is
-            small (default 15) and grid sampling uses zero padding, so
-            no synthetic content is hallucinated outside the field of
-            view. Set to ``0`` to disable.
-        flip_horizontal: Whether to apply a random horizontal flip with
-            probability 0.5.
-        flip_vertical: Whether to apply a random vertical flip with
-            probability 0.5.
-        gaussian_std: Standard deviation of additive zero-mean Gaussian
-            noise (simulating Johnson / dark-current detector noise).
-            Set to ``0`` to disable.
-        poisson_scale: Strength of the signal-dependent shot-noise term.
-            We use a Gaussian approximation ``N(0, scale * sqrt(|x|))``
-            because ``torch.poisson`` is unsupported on Apple MPS. Set
-            to ``0`` to disable.
-        intensity_scale_range: ``(low, high)`` multiplicative range used
-            to simulate exposure variation, e.g. ``(0.8, 1.2)``. Set to
-            ``None`` to disable.
-        rotation_prob: Probability of applying rotation each call.
-        gaussian_prob: Probability of applying Gaussian noise each call.
-        poisson_prob: Probability of applying Poisson noise each call.
-        intensity_prob: Probability of applying intensity scaling.
+
+@dataclass
+class BaseTransform:
+    """Apply transform with probability ``p``. Override `apply_image` /
+    `apply_label`; the call decides whether to fire and dispatches.
     """
 
-    def __init__(
-        self,
-        rotation_degrees: float = 15.0,
-        flip_horizontal: bool = True,
-        flip_vertical: bool = True,
-        gaussian_std: float = 0.02,
-        poisson_scale: float = 0.05,
-        intensity_scale_range: tuple[float, float] | None = (0.85, 1.15),
-        rotation_prob: float = 0.5,
-        gaussian_prob: float = 0.5,
-        poisson_prob: float = 0.5,
-        intensity_prob: float = 0.5,
-    ) -> None:
-        super().__init__()
-        self.rotation_degrees = rotation_degrees
-        self.flip_horizontal = flip_horizontal
-        self.flip_vertical = flip_vertical
-        self.gaussian_std = gaussian_std
-        self.poisson_scale = poisson_scale
-        self.intensity_scale_range = intensity_scale_range
-        self.rotation_prob = rotation_prob
-        self.gaussian_prob = gaussian_prob
-        self.poisson_prob = poisson_prob
-        self.intensity_prob = intensity_prob
+    p: float = 1.0
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Apply augmentations to a single image or batch.
+    def __call__(self, sample: Sample) -> Sample:
+        if self.p < 1.0 and torch.rand(1).item() >= self.p:
+            return sample
+        image = sample["image"]
+        label = sample["label"]
+        params = self.sample_params(image)
+        return {
+            "image": self.apply_image(image, params),
+            "label": self.apply_label(label, params),
+        }
 
-        Args:
-            x: Tensor of shape ``(C, H, W)`` or ``(B, C, H, W)``.
+    def sample_params(self, image: torch.Tensor) -> dict:  # noqa: ARG002
+        return {}
 
-        Returns:
-            Augmented tensor of the same shape.
-        """
-        if x.ndim == 3:
-            x = x.unsqueeze(0)
-            squeeze_back = True
-        elif x.ndim == 4:
-            squeeze_back = False
+    def apply_image(self, image: torch.Tensor, params: dict) -> torch.Tensor:  # noqa: ARG002
+        return image
+
+    def apply_label(self, label: torch.Tensor, params: dict) -> torch.Tensor:  # noqa: ARG002
+        return label
+
+
+class Compose:
+    """Chain ``BaseTransform``s in order. Mirrors ultralytics ``Compose``."""
+
+    def __init__(self, transforms: list[BaseTransform]) -> None:
+        self.transforms = transforms
+
+    def __call__(self, sample: Sample) -> Sample:
+        for t in self.transforms:
+            sample = t(sample)
+        return sample
+
+
+# ---------------------------------------------------------------------------
+# Photometric (image only)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class RandomBrightnessContrast(BaseTransform):
+    """Affine intensity remap ``y = a*x + b`` per ultralytics ``RandomHSV``
+    pattern (image-only). Hue/saturation are skipped — grayscale only."""
+
+    p: float = 0.7
+    brightness: float = 0.3
+    contrast: float = 0.3
+
+    def sample_params(self, image: torch.Tensor) -> dict:  # noqa: ARG002
+        b = (torch.rand(1).item() * 2.0 - 1.0) * self.brightness
+        c = 1.0 + (torch.rand(1).item() * 2.0 - 1.0) * self.contrast
+        return {"b": b, "c": c}
+
+    def apply_image(self, image: torch.Tensor, params: dict) -> torch.Tensor:
+        out = image * params["c"] + params["b"]
+        return out.clamp(0.0, 1.0)
+
+
+@dataclass
+class RandomGamma(BaseTransform):
+    """Power-law remap ``y = x**gamma`` — captures non-linear detector
+    response variation between simulator and real microscope."""
+
+    p: float = 0.4
+    gamma_range: tuple[float, float] = (0.5, 1.7)
+
+    def sample_params(self, image: torch.Tensor) -> dict:  # noqa: ARG002
+        lo, hi = self.gamma_range
+        return {"gamma": lo + (hi - lo) * torch.rand(1).item()}
+
+    def apply_image(self, image: torch.Tensor, params: dict) -> torch.Tensor:
+        return image.clamp(0.0, 1.0).pow(params["gamma"])
+
+
+@dataclass
+class GaussianNoise(BaseTransform):
+    """Additive zero-mean Gaussian noise — Johnson / dark-current model."""
+
+    p: float = 0.5
+    std_range: tuple[float, float] = (0.005, 0.05)
+
+    def sample_params(self, image: torch.Tensor) -> dict:  # noqa: ARG002
+        lo, hi = self.std_range
+        return {"std": lo + (hi - lo) * torch.rand(1).item()}
+
+    def apply_image(self, image: torch.Tensor, params: dict) -> torch.Tensor:
+        noise = torch.randn_like(image) * params["std"]
+        return (image + noise).clamp(0.0, 1.0)
+
+
+@dataclass
+class PoissonNoise(BaseTransform):
+    """Signal-dependent shot noise via Gaussian approximation
+    ``N(0, scale * sqrt(x))`` (real Poisson is unsupported on MPS)."""
+
+    p: float = 0.5
+    scale_range: tuple[float, float] = (0.02, 0.12)
+
+    def sample_params(self, image: torch.Tensor) -> dict:  # noqa: ARG002
+        lo, hi = self.scale_range
+        return {"scale": lo + (hi - lo) * torch.rand(1).item()}
+
+    def apply_image(self, image: torch.Tensor, params: dict) -> torch.Tensor:
+        noise = torch.randn_like(image) * params["scale"] * image.clamp_min(0).sqrt()
+        return (image + noise).clamp(0.0, 1.0)
+
+
+@dataclass
+class RandomBlur(BaseTransform):
+    """Gaussian blur — matches defocus / scan jitter common on real SEM."""
+
+    p: float = 0.3
+    kernel_range: tuple[int, int] = (3, 7)
+
+    def sample_params(self, image: torch.Tensor) -> dict:  # noqa: ARG002
+        lo, hi = self.kernel_range
+        k = int(torch.randint(lo, hi + 1, (1,)).item())
+        if k % 2 == 0:
+            k += 1
+        return {"k": k}
+
+    def apply_image(self, image: torch.Tensor, params: dict) -> torch.Tensor:
+        k = params["k"]
+        sigma = max(0.3 * ((k - 1) * 0.5 - 1) + 0.8, 0.5)
+        coords = torch.arange(k, dtype=image.dtype, device=image.device) - (k - 1) / 2
+        g1 = torch.exp(-(coords**2) / (2 * sigma**2))
+        g1 = g1 / g1.sum()
+        kernel = g1.unsqueeze(0) * g1.unsqueeze(1)
+        kernel = kernel.expand(image.shape[0], 1, k, k)
+        pad = k // 2
+        x = image.unsqueeze(0)
+        x = nn_functional.pad(x, (pad, pad, pad, pad), mode="reflect")
+        return nn_functional.conv2d(x, kernel, groups=image.shape[0]).squeeze(0)
+
+
+# ---------------------------------------------------------------------------
+# Geometric (image + label synced)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class RandomFlip(BaseTransform):
+    """Flip along horizontal or vertical axis (or both, if direction = 'hv')."""
+
+    p: float = 0.5
+    direction: str = "horizontal"
+
+    def __call__(self, sample: Sample) -> Sample:
+        if self.p < 1.0 and torch.rand(1).item() >= self.p:
+            return sample
+        if self.direction in ("horizontal", "h"):
+            dim_img, dim_lbl = -1, -1
+        elif self.direction in ("vertical", "v"):
+            dim_img, dim_lbl = -2, -2
         else:
-            raise ValueError(
-                f"Expected (C, H, W) or (B, C, H, W); got {tuple(x.shape)}"
+            raise ValueError(f"unknown direction: {self.direction}")
+        return {
+            "image": torch.flip(sample["image"], dims=[dim_img]),
+            "label": torch.flip(sample["label"], dims=[dim_lbl]),
+        }
+
+
+@dataclass
+class RandomRotate90(BaseTransform):
+    """Random 90° rotation — preserves labels exactly (no interpolation)."""
+
+    p: float = 0.5
+
+    def __call__(self, sample: Sample) -> Sample:
+        if self.p < 1.0 and torch.rand(1).item() >= self.p:
+            return sample
+        k = int(torch.randint(1, 4, (1,)).item())
+        return {
+            "image": torch.rot90(sample["image"], k=k, dims=(-2, -1)),
+            "label": torch.rot90(sample["label"], k=k, dims=(-2, -1)),
+        }
+
+
+@dataclass
+class RandomAffine(BaseTransform):
+    """Translate + scale + small rotation in one affine step.
+
+    Mirrors ``ultralytics.data.augment.RandomPerspective`` minus the
+    perspective term. Image uses bilinear; label uses nearest with
+    ``IGNORE_INDEX`` fill so out-of-bounds pixels don't get assigned to a
+    real class.
+    """
+
+    p: float = 0.7
+    degrees: float = 15.0
+    translate: float = 0.15
+    scale_range: tuple[float, float] = (0.7, 1.3)
+
+    def sample_params(self, image: torch.Tensor) -> dict:  # noqa: ARG002
+        ang = (torch.rand(1).item() * 2.0 - 1.0) * self.degrees * math.pi / 180.0
+        s = self.scale_range[0] + (self.scale_range[1] - self.scale_range[0]) * torch.rand(1).item()
+        tx = (torch.rand(1).item() * 2.0 - 1.0) * self.translate
+        ty = (torch.rand(1).item() * 2.0 - 1.0) * self.translate
+        cos_a, sin_a = math.cos(ang), math.sin(ang)
+        return {
+            "theta": torch.tensor(
+                [[cos_a / s, -sin_a / s, tx], [sin_a / s, cos_a / s, ty]],
+                dtype=torch.float32,
             )
+        }
 
-        x = self._maybe_rotate(x)
-        if self.flip_horizontal and torch.rand(1).item() < 0.5:
-            x = torch.flip(x, dims=[3])
-        if self.flip_vertical and torch.rand(1).item() < 0.5:
-            x = torch.flip(x, dims=[2])
-        x = self._maybe_intensity(x)
-        x = self._maybe_gaussian(x)
-        x = self._maybe_poisson(x)
-
-        return x.squeeze(0) if squeeze_back else x
-
-    def _maybe_rotate(self, x: torch.Tensor) -> torch.Tensor:
-        if self.rotation_degrees <= 0 or torch.rand(1).item() >= self.rotation_prob:
-            return x
-        angle = (torch.rand(1).item() * 2.0 - 1.0) * self.rotation_degrees
-        rad = angle * math.pi / 180.0
-        cos_a, sin_a = math.cos(rad), math.sin(rad)
-        theta = (
-            torch.tensor(
-                [[cos_a, -sin_a, 0.0], [sin_a, cos_a, 0.0]],
-                dtype=x.dtype,
-                device=x.device,
-            )
-            .unsqueeze(0)
-            .expand(x.shape[0], -1, -1)
-        )
+    def apply_image(self, image: torch.Tensor, params: dict) -> torch.Tensor:
+        theta = params["theta"].to(image.device, dtype=image.dtype).unsqueeze(0)
+        x = image.unsqueeze(0)
         grid = nn_functional.affine_grid(theta, list(x.size()), align_corners=False)
-        return nn_functional.grid_sample(
+        out = nn_functional.grid_sample(
             x, grid, mode="bilinear", padding_mode="zeros", align_corners=False
         )
+        return out.squeeze(0).clamp(0.0, 1.0)
 
-    def _maybe_gaussian(self, x: torch.Tensor) -> torch.Tensor:
-        if self.gaussian_std <= 0 or torch.rand(1).item() >= self.gaussian_prob:
-            return x
-        return x + torch.randn_like(x) * self.gaussian_std
+    def apply_label(self, label: torch.Tensor, params: dict) -> torch.Tensor:
+        theta = params["theta"].to(label.device).unsqueeze(0)
+        x = label.float().unsqueeze(0).unsqueeze(0)
+        grid = nn_functional.affine_grid(theta, list(x.size()), align_corners=False)
+        out = nn_functional.grid_sample(
+            x, grid, mode="nearest", padding_mode="zeros", align_corners=False
+        )
+        out = out.squeeze(0).squeeze(0).long()
+        # `padding_mode="zeros"` fills with class 0 — mark out-of-FOV pixels
+        # as IGNORE so loss doesn't supervise them as background.
+        h, w = label.shape
+        edge = torch.zeros_like(label, dtype=torch.bool)
+        ones = torch.ones(1, 1, h, w, device=label.device)
+        in_view = (
+            nn_functional.grid_sample(
+                ones, grid, mode="nearest", padding_mode="zeros", align_corners=False
+            )
+            .squeeze(0)
+            .squeeze(0)
+            > 0.5
+        )
+        edge = ~in_view
+        out[edge] = IGNORE_INDEX
+        return out
 
-    def _maybe_poisson(self, x: torch.Tensor) -> torch.Tensor:
-        if self.poisson_scale <= 0 or torch.rand(1).item() >= self.poisson_prob:
-            return x
-        return x + torch.randn_like(x) * self.poisson_scale * x.abs().sqrt()
 
-    def _maybe_intensity(self, x: torch.Tensor) -> torch.Tensor:
-        if self.intensity_scale_range is None:
-            return x
-        if torch.rand(1).item() >= self.intensity_prob:
-            return x
-        lo, hi = self.intensity_scale_range
-        if hi < lo:
-            return x
-        scale = lo + (hi - lo) * torch.rand(1).item()
-        return x * scale
+# ---------------------------------------------------------------------------
+# Convenience factory mirroring ultralytics ``v8_transforms`` defaults
+# ---------------------------------------------------------------------------
 
 
-__all__ = ["ScienceAugmentation"]
+def default_seg_aug() -> Compose:
+    """Default segmentation augmentation pipeline tuned for sim->real.
+
+    Order mirrors ultralytics: geometric first, then photometric, then noise.
+    Strong photometric range targets the dim/contrast-shifted exp domain.
+    """
+    return Compose(
+        [
+            RandomAffine(p=0.85, degrees=20.0, translate=0.2, scale_range=(0.6, 1.4)),
+            RandomFlip(p=0.5, direction="horizontal"),
+            RandomFlip(p=0.5, direction="vertical"),
+            RandomRotate90(p=0.5),
+            RandomBrightnessContrast(p=0.85, brightness=0.4, contrast=0.4),
+            RandomGamma(p=0.5, gamma_range=(0.4, 1.8)),
+            RandomBlur(p=0.3, kernel_range=(3, 7)),
+            GaussianNoise(p=0.7, std_range=(0.01, 0.06)),
+            PoissonNoise(p=0.7, scale_range=(0.02, 0.15)),
+        ]
+    )
+
+
+__all__ = [
+    "BaseTransform",
+    "Compose",
+    "RandomBrightnessContrast",
+    "RandomGamma",
+    "GaussianNoise",
+    "PoissonNoise",
+    "RandomBlur",
+    "RandomFlip",
+    "RandomRotate90",
+    "RandomAffine",
+    "default_seg_aug",
+    "IGNORE_INDEX",
+]

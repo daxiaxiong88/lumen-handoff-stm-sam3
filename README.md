@@ -23,7 +23,9 @@ lumen/
 ## 快速开始
 
 ```bash
-pip install -e ".[dev]"
+source .venv/bin/activate
+uv sync
+uv pip install -e ".[dev]"
 ```
 
 ## 开发
