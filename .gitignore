@@ -20,9 +20,12 @@ wheels/
 .installed.cfg
 *.egg
 
-# Data and weights (too large for git)
+# Data and model weights/checkpoints (too large for git)
 data/
 weights/
+model/*
+!model/
+!model/MANIFEST.md
 
 # macOS
 .DS_Store

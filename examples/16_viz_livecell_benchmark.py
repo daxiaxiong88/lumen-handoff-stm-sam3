@@ -1,7 +1,7 @@
 """Visualize the LiveCELL multi-head benchmark result.
 
 This script reads the tracked benchmark JSON and the local checkpoint from
-``weights/livecell/lumen_multihead.pt``. It produces a compact figure with:
+``model/livecell/lumen_multihead.pt``. It produces a compact figure with:
 
 * supervised baseline vs. multi-head mIoU
 * sequential vs. joint compute
@@ -35,7 +35,7 @@ from lumen.training import MultiHeadMicroscopyModel
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--benchmark", default=".benchmarks/livecell_multihead.json")
-    parser.add_argument("--checkpoint", default="weights/livecell/lumen_multihead.pt")
+    parser.add_argument("--checkpoint", default="model/livecell/lumen_multihead.pt")
     parser.add_argument("--encoder", default="eupe-pretrained")
     parser.add_argument(
         "--segmentation-head",

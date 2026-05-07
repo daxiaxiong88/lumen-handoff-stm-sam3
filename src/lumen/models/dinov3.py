@@ -14,7 +14,7 @@ class DINOv3Encoder(EncoderBase):
 
     def __init__(
         self,
-        model_dir: str | Path = "weights/dinov3-vits16-pretrain-lvd1689m",
+        model_dir: str | Path = "model/dino/dinov3-vits16-pretrain-lvd1689m",
         *,
         device: torch.device | str | None = None,
         local_files_only: bool = True,
@@ -130,7 +130,7 @@ class DINOv3Encoder(EncoderBase):
 
 @register_encoder("dinov3")
 def load_dinov3_encoder(
-    model_dir: str | Path = "weights/dinov3-vits16-pretrain-lvd1689m",
+    model_dir: str | Path = "model/dino/dinov3-vits16-pretrain-lvd1689m",
     *,
     device: torch.device | str | None = None,
 ) -> DINOv3Encoder:

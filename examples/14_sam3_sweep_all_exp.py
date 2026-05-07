@@ -18,7 +18,7 @@ Usage::
 
     /Users/zhangzz/miniconda3/bin/python examples/14_sam3_sweep_all_exp.py
 
-Skips cleanly if `weights/sam3/model.safetensors` isn't loadable.
+Skips cleanly if `model/sam3/model.safetensors` isn't loadable.
 """
 
 from __future__ import annotations

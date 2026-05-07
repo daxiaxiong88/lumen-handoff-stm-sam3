@@ -14,7 +14,7 @@ Example:
       --train-annotations /path/to/livecell/annotations/livecell_train.json \
       --val-images /path/to/livecell/images/val \
       --val-annotations /path/to/livecell/annotations/livecell_val.json \
-      --output-checkpoint weights/livecell/lumen_multihead.pt \
+      --output-checkpoint model/livecell/lumen_multihead.pt \
       --output-report .benchmarks/livecell_multihead.json
 """
 

@@ -17,7 +17,7 @@ Usage::
 
     uv run --python .venv/bin/python examples/13_sam3_sim_to_real.py
 
-If the SAM3 weights at ``weights/sam3/model.safetensors`` aren't
+If the SAM3 weights at ``model/sam3/model.safetensors`` aren't
 downloaded yet the script prints a clear message and exits with code 0
 — so it doubles as documentation of the workflow even before the
 checkpoint lands.
@@ -98,7 +98,7 @@ def _try_build_segmenter() -> object | None:
         print(f"[skip] SAM3 weights not loadable: {exc}")
         print(
             "       Download them with `huggingface-cli download facebook/sam3 "
-            "--local-dir weights/sam3` and re-run."
+            "--local-dir model/sam3` and re-run."
         )
         return None
 

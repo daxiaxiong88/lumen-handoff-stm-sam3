@@ -18,7 +18,7 @@ so it can play either of two roles in the framework:
 Both surfaces are lazy-loading — the heavy ``transformers`` import only
 happens when the factory is called, so the registry stays cheap.
 
-The default checkpoint expects ``weights/sam3/`` to contain the
+The default checkpoint expects ``model/sam3/`` to contain the
 HuggingFace assets. Pass ``model_dir=...`` to override.
 """
 
@@ -49,8 +49,8 @@ _SAM3_EMBED_DIM = 1024
 
 
 def _default_model_dir() -> Path:
-    """Project-relative default for ``weights/sam3``."""
-    return Path(__file__).resolve().parents[3] / "weights" / "sam3"
+    """Project-relative default for ``model/sam3``."""
+    return Path(__file__).resolve().parents[3] / "model" / "sam3"
 
 
 def _load_sam3_model(
@@ -161,7 +161,7 @@ def load_sam3_image_encoder(
 
     Args:
         model_dir: Path to the HuggingFace checkpoint directory. Defaults
-            to ``weights/sam3`` relative to the repo root.
+            to ``model/sam3`` relative to the repo root.
         device: Target device.
         local_files_only: If ``True`` (default), refuse to download from
             HF Hub. Set ``False`` to fetch lazily.
@@ -209,7 +209,7 @@ class Sam3Segmenter(SegmenterBase):
         labels: torch.Tensor | np.ndarray | None = None,
         text: str | list[str] | None = None,
         multimask: bool = False,
-    ) -> "sv.Detections":
+    ) -> sv.Detections:
         """Run SAM3 with the given prompts and return ``sv.Detections``."""
         del multimask  # unused; SAM3 produces one mask per query/prompt.
         if points is not None:
@@ -219,7 +219,6 @@ class Sam3Segmenter(SegmenterBase):
         if boxes is None and text is None:
             raise ValueError("SAM3 needs at least one of `boxes` or `text`.")
 
-        import supervision as sv
 
         rgb_image = self._to_rgb_uint8(image)
         h, w = rgb_image.shape[:2]
@@ -295,7 +294,7 @@ class Sam3Segmenter(SegmenterBase):
 
     def _results_to_detections(
         self, results: list[dict[str, Any]], image_size: tuple[int, int]
-    ) -> "sv.Detections":
+    ) -> sv.Detections:
         """Convert SAM3 post-processor output to ``sv.Detections``."""
         import supervision as sv
 
@@ -364,7 +363,7 @@ def load_sam3_segmenter(
 
     Args:
         model_dir: Path to the HuggingFace checkpoint directory. Defaults
-            to ``weights/sam3`` relative to the repo root.
+            to ``model/sam3`` relative to the repo root.
         device: Target device.
         local_files_only: If ``True`` (default), refuse to download from
             HF Hub.

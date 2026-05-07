@@ -9,7 +9,7 @@ from lumen.models import DINOv3Encoder
 
 
 def test_dinov3_local_checkpoint_patch_tokens() -> None:
-    model_dir = Path("weights/dinov3-vits16-pretrain-lvd1689m")
+    model_dir = Path("model/dino/dinov3-vits16-pretrain-lvd1689m")
     if not model_dir.exists():
         pytest.skip("DINOv3 checkpoint not downloaded")
     encoder = DINOv3Encoder(model_dir, device="cpu")

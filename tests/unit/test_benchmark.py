@@ -21,7 +21,7 @@ def test_benchmark_result_derives_gates() -> None:
         multihead_metric=0.85,
         sequential_compute=100.0,
         joint_compute=68.0,
-        checkpoint_path="weights/livecell/lumen_multihead.pt",
+        checkpoint_path="model/livecell/lumen_multihead.pt",
     )
     assert result.fewshot_improvement == pytest.approx(0.0625)
     assert result.efficiency_ratio == pytest.approx(0.68)
@@ -29,7 +29,7 @@ def test_benchmark_result_derives_gates() -> None:
 
 
 def test_benchmark_report_roundtrip_and_validation(tmp_path: Path) -> None:
-    checkpoint_path = tmp_path / "weights" / "tissuenet" / "lumen_multihead.pt"
+    checkpoint_path = tmp_path / "model" / "tissuenet" / "lumen_multihead.pt"
     checkpoint_path.parent.mkdir(parents=True)
     checkpoint_path.write_bytes(b"checkpoint")
     result = MicroscopyBenchmarkResult(
@@ -60,7 +60,7 @@ def test_benchmark_report_fails_when_checkpoint_path_is_missing(
         multihead_metric=0.64,
         sequential_compute=10.0,
         joint_compute=6.5,
-        checkpoint_path="weights/tissuenet/missing.pt",
+        checkpoint_path="model/tissuenet/missing.pt",
     )
     path = tmp_path / "missing_checkpoint.json"
     save_benchmark_result(result, path)

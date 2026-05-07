@@ -49,7 +49,7 @@ tokens = encoder(images)  # (B, N, D)
 
 Important details:
 
-- `eupe-pretrained` loads weights from `weights/EUPE-ViT-T.pt` by default.
+- `eupe-pretrained` loads weights from `model/eupe/EUPE-ViT-T.pt` by default.
 - Pretrained EUPE weights are usually 3-channel. The loader enables
   `auto_convert_input_channels=True`, so grayscale `(B, 1, H, W)` inputs are
   repeated to 3 channels.
@@ -64,7 +64,7 @@ Important details:
 ```python
 from lumen.models import build_encoder
 
-encoder = build_encoder("dinov3", model_dir="weights/dinov3-vits16-pretrain-lvd1689m")
+encoder = build_encoder("dinov3", model_dir="model/dino/dinov3-vits16-pretrain-lvd1689m")
 tokens = encoder(images)  # (B, N, D)
 ```
 
@@ -244,7 +244,7 @@ uv run python examples/15_public_microscopy_benchmark.py \
   --batch-size 2 \
   --max-train-samples 128 \
   --max-val-samples 32 \
-  --output-checkpoint weights/livecell/lumen_multihead_upernet_dice.pt \
+  --output-checkpoint model/livecell/lumen_multihead_upernet_dice.pt \
   --output-report .benchmarks/livecell_upernet_dice_benchmark.json
 ```
 
@@ -253,7 +253,7 @@ Visualization:
 ```bash
 uv run python examples/16_viz_livecell_benchmark.py \
   --benchmark .benchmarks/livecell_upernet_dice_benchmark.json \
-  --checkpoint weights/livecell/lumen_multihead_upernet_dice.pt \
+  --checkpoint model/livecell/lumen_multihead_upernet_dice.pt \
   --segmentation-head auto \
   --image-size 256 \
   --scan-samples 32 \
@@ -333,7 +333,7 @@ uv run mypy src/
 - Mean IoU can be misleading on sparse foreground masks. Always inspect
   foreground IoU/Dice and qualitative overlays.
 - MPS support exists for many paths, but mixed-precision scaling is CUDA-only.
-- Large local data and checkpoints under `data/` and `weights/` are not intended
+- Large local data and checkpoints under `data/` and `model/` are not intended
   to be committed.
 
 ## Public API Snapshot

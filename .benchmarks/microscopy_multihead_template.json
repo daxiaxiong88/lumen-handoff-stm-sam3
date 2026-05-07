@@ -6,6 +6,6 @@
   "multihead_metric": 0.0,
   "sequential_compute": 0.0,
   "joint_compute": 0.0,
-  "checkpoint_path": "weights/livecell/lumen_multihead.pt",
+  "checkpoint_path": "model/livecell/lumen_multihead.pt",
   "notes": "Fill this with a completed public microscopy benchmark run, then validate with lumen.utils.validate_benchmark_report."
 }

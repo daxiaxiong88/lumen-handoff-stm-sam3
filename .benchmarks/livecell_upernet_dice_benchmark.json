@@ -8,6 +8,6 @@
   "sequential_compute": 73.69801591697615,
   "joint_compute": 41.97261687499122,
   "efficiency_ratio": 0.5695216669370733,
-  "checkpoint_path": "weights/livecell/lumen_multihead_upernet_dice.pt",
+  "checkpoint_path": "model/livecell/lumen_multihead_upernet_dice.pt",
   "passes": false
 }

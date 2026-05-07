@@ -10,7 +10,7 @@ typically unavailable in CI. These tests therefore rely on either:
 
 A single weight-gated smoke test exercises the real loader when the
 HuggingFace ``model.safetensors`` is fully downloaded under
-``weights/sam3/``.
+``model/sam3/``.
 """
 
 from __future__ import annotations
@@ -36,7 +36,6 @@ from lumen.models import (
     list_segmenters,
 )
 from lumen.models.sam3 import _SAM3_EMBED_DIM, _SAM3_IMAGE_SIZE, _SAM3_PATCH_SIZE
-
 
 # ---------------------------------------------------------------------------
 # Fakes
@@ -240,7 +239,7 @@ class TestSam3Segmenter:
 
 
 def _sam3_weights_are_present() -> bool:
-    weights = Path("weights/sam3/model.safetensors")
+    weights = Path("model/sam3/model.safetensors")
     return weights.exists() and weights.stat().st_size > 1_000_000
 
 
@@ -249,7 +248,7 @@ class TestSam3RealWeights:
 
     @pytest.mark.skipif(
         not _sam3_weights_are_present(),
-        reason="SAM3 weights/sam3/model.safetensors not downloaded",
+        reason="SAM3 model/sam3/model.safetensors not downloaded",
     )
     def test_build_image_encoder_via_registry(self) -> None:
         encoder = build_encoder("sam3-image")
@@ -257,7 +256,7 @@ class TestSam3RealWeights:
 
     @pytest.mark.skipif(
         not _sam3_weights_are_present(),
-        reason="SAM3 weights/sam3/model.safetensors not downloaded",
+        reason="SAM3 model/sam3/model.safetensors not downloaded",
     )
     def test_build_segmenter_via_registry(self) -> None:
         segmenter = build_segmenter("sam3")

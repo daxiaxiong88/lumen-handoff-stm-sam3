@@ -241,7 +241,9 @@ def load_vendor_eupe_encoder(
     if variant not in names:
         raise ValueError(f"Unknown EUPE variant: {variant!r}")
     ckpt_path = (
-        Path(weights_path) if weights_path else repo_root / "weights" / names[variant]
+        Path(weights_path)
+        if weights_path
+        else repo_root / "model" / "eupe" / names[variant]
     )
     encoder = EUPEEncoder.from_pretrained(
         ckpt_path,
