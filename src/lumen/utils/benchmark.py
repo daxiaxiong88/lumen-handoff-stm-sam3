@@ -111,6 +111,14 @@ def validate_benchmark_report(
         )
     if require_checkpoint and not result.checkpoint_path:
         errors.append("checkpoint_path is required")
+    if require_checkpoint and result.checkpoint_path:
+        checkpoint_path = Path(result.checkpoint_path)
+        report_path = Path(path)
+        candidates = [checkpoint_path]
+        if not checkpoint_path.is_absolute():
+            candidates.append(report_path.parent / checkpoint_path)
+        if not any(candidate.is_file() for candidate in candidates):
+            errors.append(f"checkpoint_path does not exist: {result.checkpoint_path}")
     return {
         **result.to_dict(),
         "valid": not errors,
