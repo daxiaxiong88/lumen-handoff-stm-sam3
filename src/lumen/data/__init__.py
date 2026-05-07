@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from lumen.data.augment import ScienceAugmentation
+from lumen.data.augment import Compose, default_seg_aug
 from lumen.data.dataset import (
+    COCOSegmentationDataset,
     FIBDataset,
     ImageMetadata,
-    SegmentationPairDataset,
     ScientificImageDataset,
+    SegmentationPairDataset,
     STEMDataset,
     UnlabeledScientificImageDataset,
     ensure_channel_count,
@@ -22,14 +23,16 @@ from lumen.data.supervision_bridge import (
 )
 
 __all__ = [
+    "COCOSegmentationDataset",
+    "Compose",
     "FIBDataset",
     "ImageMetadata",
-    "ScienceAugmentation",
     "SegmentationPairDataset",
     "ScientificImageDataset",
     "STEMDataset",
     "SupervisionBridge",
     "UnlabeledScientificImageDataset",
+    "default_seg_aug",
     "detection_head_to_detections",
     "ensure_channel_count",
     "keypoints_to_supervision",

@@ -25,6 +25,7 @@ only need pixels.
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -471,8 +472,7 @@ class UnlabeledScientificImageDataset(ScientificImageDataset):
             p
             for p in self.paths
             if not any(
-                p.name.lower().endswith(suffix)
-                for suffix in exclude_label_suffixes
+                p.name.lower().endswith(suffix) for suffix in exclude_label_suffixes
             )
         ]
         self.post_transform = transform
@@ -530,7 +530,9 @@ class SegmentationPairDataset(Dataset[dict[str, Any]]):
                 label = label[..., 0]
             values.update(int(v) for v in np.unique(label))
         self.label_values = tuple(sorted(values))
-        self.label_to_index = {value: idx for idx, value in enumerate(self.label_values)}
+        self.label_to_index = {
+            value: idx for idx, value in enumerate(self.label_values)
+        }
 
     def __len__(self) -> int:
         return len(self.pairs)
@@ -572,7 +574,134 @@ class SegmentationPairDataset(Dataset[dict[str, Any]]):
         }
 
 
+class COCOSegmentationDataset(Dataset[dict[str, Any]]):
+    """COCO-style microscopy segmentation dataset.
+
+    This supports public datasets such as LiveCELL that distribute instance
+    annotations as COCO JSON. Polygon segmentations are rasterized into a
+    semantic mask with category ids remapped to contiguous class indices.
+    RLE annotations require ``pycocotools`` and raise a clear error when that
+    optional package is unavailable.
+    """
+
+    def __init__(
+        self,
+        image_root: PathLike,
+        annotation_path: PathLike,
+        *,
+        image_size: int | tuple[int, int] | None = None,
+        channels: int = 1,
+        normalize: bool = True,
+    ) -> None:
+        self.image_root = Path(image_root)
+        self.annotation_path = Path(annotation_path)
+        self.image_size = image_size
+        self.channels = channels
+        self.normalize = normalize
+
+        with open(self.annotation_path) as fh:
+            coco = json.load(fh)
+        self.images = sorted(coco.get("images", []), key=lambda item: int(item["id"]))
+        if not self.images:
+            raise ValueError(f"No images found in {self.annotation_path}")
+        categories = sorted(
+            coco.get("categories", []), key=lambda item: int(item["id"])
+        )
+        self.category_ids = tuple(int(cat["id"]) for cat in categories)
+        self.category_to_index = {
+            category_id: idx + 1 for idx, category_id in enumerate(self.category_ids)
+        }
+        self.background_index = 0
+
+        annotations_by_image: dict[int, list[dict[str, Any]]] = {}
+        for ann in coco.get("annotations", []):
+            annotations_by_image.setdefault(int(ann["image_id"]), []).append(ann)
+        self.annotations_by_image = annotations_by_image
+
+    def __len__(self) -> int:
+        return len(self.images)
+
+    @property
+    def num_classes(self) -> int:
+        return len(self.category_ids) + 1
+
+    def __getitem__(self, index: int) -> dict[str, Any]:
+        image_info = self.images[index]
+        image_path = self.image_root / str(image_info["file_name"])
+        image, _ = load_image_array(image_path)
+        if self.normalize:
+            image = _normalize_to_float(image)
+        image_tensor = ensure_channel_count(_to_chw_tensor(image, None), self.channels)
+
+        height = int(image_info.get("height", image_tensor.shape[-2]))
+        width = int(image_info.get("width", image_tensor.shape[-1]))
+        mask = torch.zeros((height, width), dtype=torch.long)
+        for ann in self.annotations_by_image.get(int(image_info["id"]), []):
+            class_idx = self.category_to_index[int(ann["category_id"])]
+            ann_mask = self._annotation_to_mask(ann, height, width)
+            mask[ann_mask] = class_idx
+
+        if self.image_size is not None:
+            image_tensor = resize_chw(image_tensor, self.image_size, mode="bilinear")
+            mask = (
+                resize_chw(mask.unsqueeze(0).float(), self.image_size, mode="nearest")
+                .squeeze(0)
+                .long()
+            )
+
+        return {
+            "image": image_tensor,
+            "mask": mask,
+            "path": str(image_path),
+            "image_id": int(image_info["id"]),
+        }
+
+    def _annotation_to_mask(
+        self,
+        annotation: dict[str, Any],
+        height: int,
+        width: int,
+    ) -> torch.Tensor:
+        segmentation = annotation.get("segmentation")
+        if isinstance(segmentation, list):
+            return self._polygon_to_mask(segmentation, height, width)
+        if isinstance(segmentation, dict):
+            try:
+                from pycocotools import mask as mask_utils
+            except ImportError as exc:
+                raise ImportError(
+                    "COCO RLE segmentation requires pycocotools. "
+                    "Install it or convert annotations to polygons."
+                ) from exc
+            decoded = mask_utils.decode(segmentation).astype(bool)
+            return torch.from_numpy(decoded)
+        raise ValueError("Unsupported COCO segmentation format")
+
+    def _polygon_to_mask(
+        self,
+        polygons: list[list[float]],
+        height: int,
+        width: int,
+    ) -> torch.Tensor:
+        try:
+            from skimage.draw import polygon as draw_polygon
+        except ImportError as exc:
+            raise ImportError(
+                "Polygon rasterization requires scikit-image, which is a Lumen "
+                "runtime dependency."
+            ) from exc
+        mask = np.zeros((height, width), dtype=bool)
+        for poly in polygons:
+            coords = np.asarray(poly, dtype=np.float32).reshape(-1, 2)
+            if coords.shape[0] < 3:
+                continue
+            rr, cc = draw_polygon(coords[:, 1], coords[:, 0], shape=mask.shape)
+            mask[rr, cc] = True
+        return torch.from_numpy(mask)
+
+
 __all__ = [
+    "COCOSegmentationDataset",
     "FIBDataset",
     "ImageMetadata",
     "SegmentationPairDataset",
