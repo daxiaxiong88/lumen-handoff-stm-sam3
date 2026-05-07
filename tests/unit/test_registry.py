@@ -101,9 +101,19 @@ class TestHeadRegistry:
     """Verify registered downstream heads and task-model assembly."""
 
     def test_builtin_heads_are_registered(self) -> None:
-        assert {"segmentation", "upernet", "detection", "keypoint"}.issubset(
-            set(list_heads())
-        )
+        assert {
+            "classification",
+            "segmentation",
+            "upernet",
+            "detection",
+            "keypoint",
+        }.issubset(set(list_heads()))
+
+    def test_build_classification_head(self) -> None:
+        head = build_head("classification", embed_dim=32, num_classes=4)
+        tokens = torch.randn(2, 16, 32)
+        logits = head(tokens)
+        assert logits.shape == (2, 4)
 
     def test_build_segmentation_head(self) -> None:
         head = build_head(
@@ -122,6 +132,13 @@ class TestHeadRegistry:
         logits = model(torch.randn(1, 1, 64, 64))
         assert isinstance(logits, torch.Tensor)
         assert logits.shape == (1, 2, 64, 64)
+
+    def test_build_classification_task_model(self) -> None:
+        encoder = build_encoder("eupe", embed_dim=64, depth=2, num_heads=4)
+        model = build_task_model(encoder, task="classification", num_classes=3)
+        logits = model(torch.randn(2, 1, 64, 64))
+        assert isinstance(logits, torch.Tensor)
+        assert logits.shape == (2, 3)
 
     def test_task_model_head_only_groups_freeze_encoder(self) -> None:
         encoder = build_encoder("eupe", embed_dim=64, depth=2, num_heads=4)

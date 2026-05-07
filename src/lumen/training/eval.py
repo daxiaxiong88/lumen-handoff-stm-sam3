@@ -4,6 +4,58 @@ import torch
 import torch.nn.functional as nn_functional
 
 
+def top1_accuracy(logits: torch.Tensor, target: torch.Tensor) -> float:
+    """Top-1 accuracy for image-level microscopy classification."""
+    pred = logits.argmax(dim=1)
+    return (pred == target).float().mean().item()
+
+
+def macro_f1_score(
+    logits_or_pred: torch.Tensor,
+    target: torch.Tensor,
+    num_classes: int,
+) -> float:
+    """Macro F1 for cell type, organelle, or tissue classification."""
+    pred = (
+        logits_or_pred.argmax(dim=1)
+        if logits_or_pred.ndim > target.ndim
+        else logits_or_pred
+    )
+    scores: list[float] = []
+    for cls in range(num_classes):
+        pred_pos = pred == cls
+        target_pos = target == cls
+        tp = (pred_pos & target_pos).sum().float()
+        fp = (pred_pos & ~target_pos).sum().float()
+        fn = (~pred_pos & target_pos).sum().float()
+        denom = (2 * tp + fp + fn).clamp(min=1e-6)
+        if target_pos.any() or pred_pos.any():
+            scores.append((2 * tp / denom).item())
+    if not scores:
+        return 0.0
+    return sum(scores) / len(scores)
+
+
+def relative_improvement(
+    candidate: float,
+    baseline: float,
+    *,
+    higher_is_better: bool = True,
+) -> float:
+    """Relative improvement ratio used for few-shot benchmarking."""
+    if baseline == 0:
+        return 0.0
+    delta = candidate - baseline if higher_is_better else baseline - candidate
+    return delta / abs(baseline)
+
+
+def compute_efficiency_ratio(joint_compute: float, sequential_compute: float) -> float:
+    """Compute ``joint / sequential`` pretext efficiency ratio."""
+    if sequential_compute <= 0:
+        raise ValueError("sequential_compute must be positive")
+    return joint_compute / sequential_compute
+
+
 def mean_iou(
     pred: torch.Tensor,
     target: torch.Tensor,

@@ -69,6 +69,15 @@ class SegmentationDownstreamConfig:
 
 
 @dataclass
+class ClassificationDownstreamConfig:
+    """Downstream image-level microscopy classification config."""
+
+    num_classes: int = 2
+    hidden_dim: int | None = None
+    dropout: float = 0.1
+
+
+@dataclass
 class DetectionDownstreamConfig:
     """Downstream detection task config."""
 
@@ -89,6 +98,9 @@ class KeypointDownstreamConfig:
 class DownstreamConfig:
     """Container for per-task downstream configurations."""
 
+    classification: ClassificationDownstreamConfig = field(
+        default_factory=ClassificationDownstreamConfig
+    )
     segmentation: SegmentationDownstreamConfig = field(
         default_factory=SegmentationDownstreamConfig
     )
@@ -146,6 +158,35 @@ class PipelineConfig:
 
 
 @dataclass
+class MultiHeadLossConfig:
+    """Loss balancing and gradient routing for multi-head training."""
+
+    strategy: str = "fixed"  # fixed | uncertainty
+    weights: dict[str, float] = field(
+        default_factory=lambda: {
+            "classification": 1.0,
+            "segmentation": 1.0,
+            "contrastive": 1.0,
+            "mae": 1.0,
+        }
+    )
+    stop_gradient_heads: list[str] = field(default_factory=list)
+
+
+@dataclass
+class MultiHeadConfig:
+    """Joint supervised + SSL microscopy model configuration."""
+
+    enabled: bool = False
+    supervised_heads: list[str] = field(
+        default_factory=lambda: ["classification", "segmentation"]
+    )
+    self_supervised_heads: list[str] = field(default_factory=lambda: ["contrastive"])
+    weak_supervision_alpha: float = 0.0
+    loss: MultiHeadLossConfig = field(default_factory=MultiHeadLossConfig)
+
+
+@dataclass
 class DataConfig:
     """Data sub-configuration."""
 
@@ -187,6 +228,7 @@ class LumenConfig:
     downstream: DownstreamConfig = field(default_factory=DownstreamConfig)
     training: TrainingConfig = field(default_factory=TrainingConfig)
     pipeline: PipelineConfig = field(default_factory=PipelineConfig)
+    multihead: MultiHeadConfig = field(default_factory=MultiHeadConfig)
     data: DataConfig = field(default_factory=DataConfig)
 
     def get(self, path: str, default: Any = None) -> Any:
@@ -285,6 +327,8 @@ class LumenConfig:
             )
         if self.downstream.segmentation.num_classes <= 0:
             raise ValueError("downstream.segmentation.num_classes must be positive")
+        if self.downstream.classification.num_classes <= 0:
+            raise ValueError("downstream.classification.num_classes must be positive")
         if self.downstream.detection.num_classes <= 0:
             raise ValueError("downstream.detection.num_classes must be positive")
         if self.downstream.keypoint.num_keypoints <= 0:
@@ -310,6 +354,15 @@ class LumenConfig:
                     f"pipeline stage {stage.name!r} has invalid trainability "
                     f"{stage.trainability!r}"
                 )
+        if self.multihead.loss.strategy not in {"fixed", "uncertainty"}:
+            raise ValueError("multihead.loss.strategy must be 'fixed' or 'uncertainty'")
+        valid_heads = {"classification", "segmentation", "contrastive", "mae"}
+        unknown_stop = set(self.multihead.loss.stop_gradient_heads) - valid_heads
+        if unknown_stop:
+            raise ValueError(
+                "multihead.loss.stop_gradient_heads contains unknown heads: "
+                f"{sorted(unknown_stop)}"
+            )
 
 
 def _merge_dict(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:

@@ -18,6 +18,12 @@ from lumen.training.incremental import (
     ReplayBuffer,
 )
 from lumen.training.mae import MAETrainer
+from lumen.training.multihead import (
+    FixedLossBalancer,
+    HomoscedasticUncertaintyBalancer,
+    MultiHeadMicroscopyModel,
+    MultiHeadMicroscopyTrainer,
+)
 from lumen.training.stages import OptimizerStageConfig, StageRunner, TrainingStageConfig
 from lumen.training.trainer_base import TrainerProtocol
 from lumen.training.weak_supervision import (
@@ -41,12 +47,16 @@ __all__ = [
     "DetectionTrainer",
     "DiversitySampler",
     "EWCRegularizer",
+    "FixedLossBalancer",
+    "HomoscedasticUncertaintyBalancer",
     "HybridTrainer",
     "IncrementalTrainer",
     "KeypointTrainer",
     "LwFRegularizer",
     "MAETrainer",
     "MeanTeacher",
+    "MultiHeadMicroscopyModel",
+    "MultiHeadMicroscopyTrainer",
     "PseudoLabeler",
     "QueryStrategy",
     "ReplayBuffer",

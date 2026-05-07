@@ -9,7 +9,12 @@ from lumen.models.eupe import (
 )
 from lumen.models.feature_viz import tokens_to_pca_rgb
 from lumen.models.few_shot import FewShotFeatureMatcher, FewShotPrediction
-from lumen.models.heads import DetectionHead, KeypointHead, SegmentationHead
+from lumen.models.heads import (
+    ClassificationHead,
+    DetectionHead,
+    KeypointHead,
+    SegmentationHead,
+)
 from lumen.models.registry import (
     build_encoder,
     build_head,
@@ -38,6 +43,7 @@ from lumen.models.task_model import (
 
 __all__ = [
     "DINOv3Encoder",
+    "ClassificationHead",
     "DetectionHead",
     "EUPEConfig",
     "EUPEEncoder",

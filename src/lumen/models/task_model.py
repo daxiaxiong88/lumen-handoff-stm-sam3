@@ -74,7 +74,7 @@ class LumenTaskModel(nn.Module):
         encoder: EncoderProtocol,
         head: nn.Module,
         *,
-        task: Literal["segmentation", "detection", "keypoint"],
+        task: Literal["classification", "segmentation", "detection", "keypoint"],
     ) -> None:
         super().__init__()
         self.encoder = encoder
@@ -115,7 +115,7 @@ class LumenTaskModel(nn.Module):
 def build_task_model(
     encoder: EncoderProtocol,
     *,
-    task: Literal["segmentation", "detection", "keypoint"],
+    task: Literal["classification", "segmentation", "detection", "keypoint"],
     head_name: str | None = None,
     num_classes: int | None = None,
     num_keypoints: int | None = None,
@@ -128,10 +128,12 @@ def build_task_model(
         "patch_size": encoder.patch_size,
         **head_kwargs,
     }
-    if task in {"segmentation", "detection"}:
+    if task in {"classification", "segmentation", "detection"}:
         if num_classes is None:
             raise ValueError(f"{task} requires num_classes")
         kwargs["num_classes"] = num_classes
+        if task == "classification":
+            kwargs.pop("patch_size", None)
     elif task == "keypoint":
         if num_keypoints is None:
             raise ValueError("keypoint requires num_keypoints")

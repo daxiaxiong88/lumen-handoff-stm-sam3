@@ -122,6 +122,36 @@ class SegmentationHead(nn.Module):
         return x
 
 
+class ClassificationHead(nn.Module):
+    """Image-level classification head for microscopy labels.
+
+    Pools patch tokens from a shared encoder and predicts classes such as
+    cell type, tissue state, organelle presence, or acquisition condition.
+    """
+
+    def __init__(
+        self,
+        embed_dim: int,
+        num_classes: int,
+        hidden_dim: int | None = None,
+        dropout: float = 0.1,
+    ) -> None:
+        super().__init__()
+        self.num_classes = num_classes
+        hidden = hidden_dim or embed_dim
+        self.head = nn.Sequential(
+            nn.LayerNorm(embed_dim),
+            nn.Linear(embed_dim, hidden),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden, num_classes),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Return class logits from patch tokens shaped ``(B, N, D)``."""
+        return self.head(x.mean(dim=1))
+
+
 class DetectionHead(nn.Module):
     """FPN-style lightweight detection head.
 
@@ -225,6 +255,21 @@ def _build_segmentation_head(
         num_classes=num_classes,
         patch_size=patch_size,
         num_upsample_blocks=num_upsample_blocks,
+    )
+
+
+@register_head("classification")
+def _build_classification_head(
+    embed_dim: int,
+    num_classes: int,
+    hidden_dim: int | None = None,
+    dropout: float = 0.1,
+) -> ClassificationHead:
+    return ClassificationHead(
+        embed_dim=embed_dim,
+        num_classes=num_classes,
+        hidden_dim=hidden_dim,
+        dropout=dropout,
     )
 
 

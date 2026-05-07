@@ -14,14 +14,18 @@ from lumen.training import (
     SegmentationTrainer,
 )
 from lumen.training.eval import (
+    compute_efficiency_ratio,
     dice_coefficient,
+    macro_f1_score,
     mae,
     mean_average_precision,
     mean_iou,
     multi_scale_segmentation_metrics,
     pixel_accuracy,
     precision_recall_curve,
+    relative_improvement,
     rmse,
+    top1_accuracy,
 )
 from lumen.utils.config import LumenConfig, load_config, load_config_from_env
 from lumen.utils.logging import (
@@ -203,6 +207,22 @@ class TestKeypointTrainer:
 class TestEvalMetrics:
     """Unit tests for evaluation metrics."""
 
+    def test_classification_top1_accuracy(self) -> None:
+        logits = torch.tensor([[3.0, 1.0], [0.1, 2.0], [4.0, 0.2]])
+        target = torch.tensor([0, 1, 1])
+        assert top1_accuracy(logits, target) == pytest.approx(2.0 / 3.0)
+
+    def test_macro_f1_score(self) -> None:
+        pred = torch.tensor([0, 1, 1, 0])
+        target = torch.tensor([0, 1, 0, 0])
+        assert macro_f1_score(pred, target, num_classes=2) == pytest.approx(
+            (0.8 + 2.0 / 3.0) / 2.0
+        )
+
+    def test_relative_improvement_and_efficiency(self) -> None:
+        assert relative_improvement(0.84, 0.80) == pytest.approx(0.05)
+        assert compute_efficiency_ratio(70.0, 100.0) == pytest.approx(0.7)
+
     def test_mean_iou_perfect(self) -> None:
         """mean_iou is 1.0 for perfect predictions."""
         pred = torch.tensor([[0, 1], [1, 0]])
@@ -333,6 +353,31 @@ class TestConfig:
             assert cfg.pipeline.stages[0].name == "head_train"
             assert cfg.pipeline.stages[0].trainability == "head_only"
             assert cfg.pipeline.stages[0].optimizer.head_lr == pytest.approx(1e-3)
+        finally:
+            os.unlink(path)
+
+    def test_load_multihead_config(self) -> None:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as fh:
+            yaml.dump(
+                {
+                    "multihead": {
+                        "enabled": True,
+                        "supervised_heads": ["classification"],
+                        "self_supervised_heads": ["contrastive", "mae"],
+                        "loss": {
+                            "strategy": "uncertainty",
+                            "stop_gradient_heads": ["contrastive"],
+                        },
+                    }
+                },
+                fh,
+            )
+            path = fh.name
+        try:
+            cfg = load_config(path)
+            assert cfg.multihead.enabled is True
+            assert cfg.multihead.loss.strategy == "uncertainty"
+            assert cfg.multihead.loss.stop_gradient_heads == ["contrastive"]
         finally:
             os.unlink(path)
 

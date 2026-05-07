@@ -23,6 +23,10 @@ pretrain:
 
 # 下游任务配置
 downstream:
+  classification:
+    num_classes: 2
+    hidden_dim: null
+    dropout: 0.1
   segmentation:
     decoder: "upernet"
     num_classes: 8
@@ -74,6 +78,25 @@ pipeline:
         encoder_lr: 1.0e-5
         head_lr: 1.0e-4
         weight_decay: 1.0e-4
+
+# 多头显微视觉训练：共享 backbone，独立监督/自监督 heads
+multihead:
+  enabled: false
+  supervised_heads:
+    - "classification"
+    - "segmentation"
+  self_supervised_heads:
+    - "contrastive"
+    - "mae"
+  weak_supervision_alpha: 0.1
+  loss:
+    strategy: "fixed"  # fixed | uncertainty
+    weights:
+      classification: 1.0
+      segmentation: 1.0
+      contrastive: 1.0
+      mae: 0.5
+    stop_gradient_heads: []
 
 # 数据配置
 data:
