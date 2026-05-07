@@ -439,6 +439,24 @@ class TestScientificImageDataset:
         assert sample["image"].dtype == torch.float32
         assert "path" in sample
 
+    def test_tiff_loader_falls_back_to_pillow_on_decode_error(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        tifffile = pytest.importorskip("tifffile")
+        path = tmp_path / "compressed.tif"
+        Image.fromarray(np.full((8, 8), 7, dtype=np.uint8)).save(path)
+
+        def _raise_decode_error(_: str) -> np.ndarray:
+            raise ValueError("compressed TIFF requires imagecodecs")
+
+        monkeypatch.setattr(tifffile, "imread", _raise_decode_error)
+        arr, metadata = load_image_array(path)
+        assert arr.shape == (8, 8)
+        assert int(arr[0, 0]) == 7
+        assert metadata["loader"] == "pillow"
+
     def test_normalization_keeps_values_in_unit_interval(
         self, image_root: Path
     ) -> None:
@@ -551,6 +569,34 @@ class TestWorkflowDatasets:
         assert sample["image"].shape == (1, 16, 16)
         assert sample["mask"].shape == (16, 16)
         assert set(sample["mask"].unique().tolist()) == {0, 1}
+
+    def test_coco_segmentation_dataset_uncompressed_rle_masks(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        pytest.importorskip("pycocotools")
+        image_dir = tmp_path / "images"
+        image_dir.mkdir()
+        Image.fromarray(np.zeros((3, 2), dtype=np.uint8)).save(image_dir / "a.png")
+        annotation = {
+            "images": [{"id": 1, "file_name": "a.png", "height": 3, "width": 2}],
+            "categories": [{"id": 7, "name": "cell"}],
+            "annotations": [
+                {
+                    "id": 1,
+                    "image_id": 1,
+                    "category_id": 7,
+                    "segmentation": {"size": [2, 3], "counts": [0, 6]},
+                }
+            ],
+        }
+        ann_path = tmp_path / "annotations.json"
+        ann_path.write_text(json.dumps(annotation))
+
+        ds = COCOSegmentationDataset(image_dir, ann_path)
+        sample = ds[0]
+        assert sample["mask"].shape == (3, 2)
+        assert set(sample["mask"].unique().tolist()) == {1}
 
 
 class TestSpecializedDatasets:

@@ -26,7 +26,7 @@ from pathlib import Path
 
 import torch
 import torch.nn.functional as nn_functional
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 
 from lumen.data import COCOSegmentationDataset
 from lumen.models import build_encoder
@@ -46,6 +46,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--image-size", type=int, default=224)
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--batch-size", type=int, default=4)
+    parser.add_argument("--max-train-samples", type=int, default=None)
+    parser.add_argument("--max-val-samples", type=int, default=None)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--ssl-weight", type=float, default=0.2)
     parser.add_argument("--device", default="auto")
@@ -167,13 +169,24 @@ def main() -> None:
         args.val_annotations,
         image_size=args.image_size,
     )
-    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
-    val_loader = DataLoader(val_ds, batch_size=args.batch_size)
+    num_classes = train_ds.num_classes
+    train_data = (
+        Subset(train_ds, range(min(args.max_train_samples, len(train_ds))))
+        if args.max_train_samples is not None
+        else train_ds
+    )
+    val_data = (
+        Subset(val_ds, range(min(args.max_val_samples, len(val_ds))))
+        if args.max_val_samples is not None
+        else val_ds
+    )
+    train_loader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True)
+    val_loader = DataLoader(val_data, batch_size=args.batch_size)
 
     baseline_encoder = build_encoder(args.encoder).to(device)
     baseline_model, baseline_compute = train_supervised_baseline(
         baseline_encoder,
-        train_ds.num_classes,
+        num_classes,
         train_loader,
         device,
         epochs=args.epochs,
@@ -183,13 +196,13 @@ def main() -> None:
         baseline_model,
         val_loader,
         device,
-        train_ds.num_classes,
+        num_classes,
     )
 
     multihead_encoder = build_encoder(args.encoder).to(device)
     multihead_model, joint_compute = train_multihead(
         multihead_encoder,
-        train_ds.num_classes,
+        num_classes,
         train_loader,
         device,
         epochs=args.epochs,
@@ -200,7 +213,7 @@ def main() -> None:
         multihead_model,
         val_loader,
         device,
-        train_ds.num_classes,
+        num_classes,
     )
 
     checkpoint_path = Path(args.output_checkpoint)

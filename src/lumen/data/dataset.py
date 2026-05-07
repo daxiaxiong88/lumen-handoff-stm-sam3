@@ -137,7 +137,7 @@ def _load_tiff(path: Path) -> tuple[np.ndarray, dict[str, Any]]:
 
         arr = tifffile.imread(str(path))
         return np.asarray(arr), {"loader": "tifffile"}
-    except ImportError:
+    except (ImportError, ValueError):
         from PIL import Image
 
         with Image.open(path) as im:
@@ -639,6 +639,8 @@ class COCOSegmentationDataset(Dataset[dict[str, Any]]):
         for ann in self.annotations_by_image.get(int(image_info["id"]), []):
             class_idx = self.category_to_index[int(ann["category_id"])]
             ann_mask = self._annotation_to_mask(ann, height, width)
+            if ann_mask.shape != mask.shape and ann_mask.T.shape == mask.shape:
+                ann_mask = ann_mask.T
             mask[ann_mask] = class_idx
 
         if self.image_size is not None:
@@ -673,7 +675,12 @@ class COCOSegmentationDataset(Dataset[dict[str, Any]]):
                     "COCO RLE segmentation requires pycocotools. "
                     "Install it or convert annotations to polygons."
                 ) from exc
-            decoded = mask_utils.decode(segmentation).astype(bool)
+            rle = segmentation
+            if isinstance(segmentation.get("counts"), list):
+                rle = mask_utils.frPyObjects(segmentation, height, width)
+            decoded = mask_utils.decode(rle).astype(bool)
+            if decoded.ndim == 3:
+                decoded = decoded.any(axis=2)
             return torch.from_numpy(decoded)
         raise ValueError("Unsupported COCO segmentation format")
 
