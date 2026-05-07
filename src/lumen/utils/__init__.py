@@ -1,4 +1,11 @@
+from lumen.utils.benchmark import (
+    MicroscopyBenchmarkResult,
+    load_benchmark_result,
+    save_benchmark_result,
+    validate_benchmark_report,
+)
 from lumen.utils.config import (
+    ClassificationDownstreamConfig,
     DataConfig,
     DetectionDownstreamConfig,
     DownstreamConfig,
@@ -6,6 +13,8 @@ from lumen.utils.config import (
     KeypointDownstreamConfig,
     LumenConfig,
     ModelConfig,
+    MultiHeadConfig,
+    MultiHeadLossConfig,
     PretrainConfig,
     SegmentationDownstreamConfig,
     TrainingConfig,
@@ -27,6 +36,7 @@ from lumen.utils.quality_gate import (
 )
 
 __all__ = [
+    "ClassificationDownstreamConfig",
     "DataConfig",
     "DetectionDownstreamConfig",
     "DownstreamConfig",
@@ -35,15 +45,21 @@ __all__ = [
     "KeypointDownstreamConfig",
     "LumenConfig",
     "ModelConfig",
+    "MicroscopyBenchmarkResult",
+    "MultiHeadConfig",
+    "MultiHeadLossConfig",
     "PretrainConfig",
     "SegmentationDownstreamConfig",
     "TrainingConfig",
     "TrainingHistory",
+    "load_benchmark_result",
     "load_checkpoint",
     "load_config",
     "load_config_from_env",
     "model_version",
+    "save_benchmark_result",
     "save_checkpoint",
+    "validate_benchmark_report",
     "ConfidenceGate",
     "OODDetector",
     "QualityScorer",
