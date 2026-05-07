@@ -35,5 +35,4 @@ pytest tests/
 ```
 
 ## 文档
-
-详见飞书文档: [Lumen 科学图像自监督学习框架](https://my.feishu.cn/docx/ZhFndjfAvoDHs0xLSGEclpoin7c)
+见 docs/dev.md
