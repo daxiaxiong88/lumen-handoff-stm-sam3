@@ -7,7 +7,8 @@ import torch.nn as nn
 import torch.nn.functional as nn_functional
 
 from lumen.models.encoder_base import EncoderProtocol
-from lumen.models.heads import DetectionHead, KeypointHead, SegmentationHead
+from lumen.models.heads import DetectionHead, KeypointHead
+from lumen.models.registry import build_head
 from lumen.models.task_model import Trainability, split_encoder_head_parameters
 from lumen.training.losses import SegmentationCriterion, SegmentationLossName
 
@@ -78,10 +79,18 @@ class SegmentationTrainer(nn.Module):
         segmentation_ce_weight: float = 1.0,
         segmentation_dice_weight: float = 1.0,
         include_background_in_dice: bool = False,
+        segmentation_head_name: str = "segmentation",
+        segmentation_head_kwargs: dict[str, object] | None = None,
     ) -> None:
         super().__init__()
         self.encoder = encoder
-        self.head = SegmentationHead(encoder.embed_dim, num_classes, encoder.patch_size)
+        self.head = build_head(
+            segmentation_head_name,
+            embed_dim=encoder.embed_dim,
+            num_classes=num_classes,
+            patch_size=encoder.patch_size,
+            **dict(segmentation_head_kwargs or {}),
+        )
         self.num_classes = num_classes
         self.mixed_precision = mixed_precision
         self.scheduler_t_max: int = scheduler_t_max

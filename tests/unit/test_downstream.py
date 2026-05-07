@@ -151,6 +151,24 @@ class TestSegmentationTrainer:
 
         assert metrics["loss"] >= 0.0
 
+    def test_upernet_head_train_step_runs(self, tiny_encoder: EUPEEncoder) -> None:
+        trainer = SegmentationTrainer(
+            tiny_encoder,
+            num_classes=2,
+            scheduler_name="none",
+            segmentation_loss="ce_dice",
+            segmentation_head_name="upernet",
+            segmentation_head_kwargs={"decoder_channels": 16},
+        )
+        batch = {
+            "image": torch.randn(1, 1, 64, 64),
+            "mask": torch.randint(0, 2, (1, 64, 64)),
+        }
+
+        metrics = trainer.train_step(batch)
+
+        assert metrics["loss"] >= 0.0
+
     def test_soft_dice_rewards_foreground_overlap(self) -> None:
         target = torch.zeros(1, 16, 16, dtype=torch.long)
         target[:, 4:12, 4:12] = 1

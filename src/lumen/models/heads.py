@@ -39,7 +39,7 @@ class ResizeConvBlock(nn.Module):
 
 
 class SegmentationHead(nn.Module):
-    """UPerNet-style segmentation head.
+    """Single-scale progressive segmentation head.
 
     Takes a sequence of encoder patch tokens and produces pixel-wise
     segmentation logits via progressive upsampling.
@@ -120,6 +120,175 @@ class SegmentationHead(nn.Module):
                 x, size=image_size, mode="bilinear", align_corners=False
             )
         return x
+
+
+class PyramidPoolingModule(nn.Module):
+    """Pyramid pooling context module used by UPerNet-style decoders."""
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        pool_scales: tuple[int, ...] = (1, 2, 3, 6),
+    ) -> None:
+        super().__init__()
+        self.pool_scales = pool_scales
+        self.stages = nn.ModuleList(
+            [
+                nn.Sequential(
+                    nn.AdaptiveAvgPool2d(scale),
+                    nn.Conv2d(in_channels, out_channels, kernel_size=1),
+                    nn.GroupNorm(1, out_channels),
+                    nn.ReLU(inplace=True),
+                )
+                for scale in pool_scales
+            ]
+        )
+        self.bottleneck = nn.Sequential(
+            nn.Conv2d(
+                in_channels + len(pool_scales) * out_channels,
+                out_channels,
+                kernel_size=3,
+                padding=1,
+            ),
+            nn.GroupNorm(1, out_channels),
+            nn.ReLU(inplace=True),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        size = x.shape[2:]
+        priors = [
+            nn_functional.interpolate(
+                stage(x),
+                size=size,
+                mode="bilinear",
+                align_corners=False,
+            )
+            for stage in self.stages
+        ]
+        return self.bottleneck(torch.cat([x, *priors], dim=1))
+
+
+class UPerNetSegmentationHead(nn.Module):
+    """UPerNet-style decoder for ViT patch tokens.
+
+    Lumen encoders normalize model-zoo backbones to a final patch-token tensor.
+    This head builds a lightweight feature pyramid from that dense token grid,
+    applies pyramid pooling on the coarsest level, fuses top-down features, and
+    upsamples to pixel logits. It is more expensive than ``SegmentationHead``
+    but gives the segmentation decoder more spatial context for sparse masks.
+    """
+
+    def __init__(
+        self,
+        embed_dim: int,
+        num_classes: int,
+        patch_size: int = 16,
+        decoder_channels: int | None = None,
+        pool_scales: tuple[int, ...] = (1, 2, 3, 6),
+    ) -> None:
+        super().__init__()
+        self.patch_size = patch_size
+        self.num_classes = num_classes
+        channels = decoder_channels or min(embed_dim, 256)
+        self.stem = nn.Sequential(
+            nn.Conv2d(embed_dim, channels, kernel_size=1),
+            nn.GroupNorm(1, channels),
+            nn.ReLU(inplace=True),
+        )
+        self.laterals = nn.ModuleList(
+            [
+                nn.Sequential(
+                    nn.Conv2d(channels, channels, kernel_size=1),
+                    nn.GroupNorm(1, channels),
+                    nn.ReLU(inplace=True),
+                )
+                for _ in range(4)
+            ]
+        )
+        self.ppm = PyramidPoolingModule(channels, channels, pool_scales)
+        self.fpn_convs = nn.ModuleList(
+            [
+                nn.Sequential(
+                    nn.Conv2d(channels, channels, kernel_size=3, padding=1),
+                    nn.GroupNorm(1, channels),
+                    nn.ReLU(inplace=True),
+                )
+                for _ in range(4)
+            ]
+        )
+        self.fpn_bottleneck = nn.Sequential(
+            nn.Conv2d(4 * channels, channels, kernel_size=3, padding=1),
+            nn.GroupNorm(1, channels),
+            nn.ReLU(inplace=True),
+        )
+        self.classifier = nn.Sequential(
+            nn.Dropout2d(0.1),
+            nn.Conv2d(channels, num_classes, kernel_size=1),
+        )
+
+    def forward(self, x: torch.Tensor, image_size: tuple[int, int]) -> torch.Tensor:
+        batch_size, num_tokens, channels = x.shape
+        h_img, w_img = image_size
+        h_patches = h_img // self.patch_size
+        w_patches = w_img // self.patch_size
+        if h_patches * w_patches != num_tokens:
+            side = int(round(num_tokens**0.5))
+            if side * side != num_tokens:
+                raise ValueError(
+                    f"Cannot infer token grid: {num_tokens} tokens are not a "
+                    f"square and do not match image_size={image_size} with "
+                    f"patch_size={self.patch_size}"
+                )
+            h_patches = w_patches = side
+
+        x = (
+            x.transpose(1, 2)
+            .contiguous()
+            .view(batch_size, channels, h_patches, w_patches)
+        )
+        base = self.stem(x)
+        h_base, w_base = base.shape[2:]
+        pyramid = [
+            base,
+            nn_functional.adaptive_avg_pool2d(
+                base,
+                output_size=((h_base + 1) // 2, (w_base + 1) // 2),
+            ),
+            nn_functional.adaptive_avg_pool2d(
+                base,
+                output_size=(max(1, (h_base + 3) // 4), max(1, (w_base + 3) // 4)),
+            ),
+            nn_functional.adaptive_avg_pool2d(base, output_size=(1, 1)),
+        ]
+        laterals = [lateral(feat) for lateral, feat in zip(self.laterals, pyramid)]
+        laterals[-1] = self.ppm(laterals[-1])
+        for i in range(len(laterals) - 1, 0, -1):
+            laterals[i - 1] = laterals[i - 1] + nn_functional.interpolate(
+                laterals[i],
+                size=laterals[i - 1].shape[2:],
+                mode="bilinear",
+                align_corners=False,
+            )
+        fpn_outs = [conv(feat) for conv, feat in zip(self.fpn_convs, laterals)]
+        fpn_outs = [
+            nn_functional.interpolate(
+                feat,
+                size=fpn_outs[0].shape[2:],
+                mode="bilinear",
+                align_corners=False,
+            )
+            for feat in fpn_outs
+        ]
+        logits = self.classifier(self.fpn_bottleneck(torch.cat(fpn_outs, dim=1)))
+        if logits.shape[2:] != image_size:
+            logits = nn_functional.interpolate(
+                logits,
+                size=image_size,
+                mode="bilinear",
+                align_corners=False,
+            )
+        return logits
 
 
 class ClassificationHead(nn.Module):
@@ -243,7 +412,6 @@ class KeypointHead(nn.Module):
 
 
 @register_head("segmentation")
-@register_head("upernet")
 def _build_segmentation_head(
     embed_dim: int,
     num_classes: int,
@@ -255,6 +423,21 @@ def _build_segmentation_head(
         num_classes=num_classes,
         patch_size=patch_size,
         num_upsample_blocks=num_upsample_blocks,
+    )
+
+
+@register_head("upernet")
+def _build_upernet_segmentation_head(
+    embed_dim: int,
+    num_classes: int,
+    patch_size: int = 16,
+    decoder_channels: int | None = None,
+) -> UPerNetSegmentationHead:
+    return UPerNetSegmentationHead(
+        embed_dim=embed_dim,
+        num_classes=num_classes,
+        patch_size=patch_size,
+        decoder_channels=decoder_channels,
     )
 
 

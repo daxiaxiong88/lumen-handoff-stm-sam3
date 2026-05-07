@@ -8,7 +8,8 @@ import torch.nn as nn
 import torch.nn.functional as nn_functional
 
 from lumen.models.encoder_base import EncoderProtocol
-from lumen.models.heads import ClassificationHead, SegmentationHead
+from lumen.models.heads import ClassificationHead
+from lumen.models.registry import build_head
 from lumen.training.contrastive import (
     ProjectionHead,
     ScientificAugmentations,
@@ -68,7 +69,7 @@ class MultiHeadMicroscopyModel(nn.Module):
         encoder: EncoderProtocol,
         *,
         classification_head: ClassificationHead | None = None,
-        segmentation_head: SegmentationHead | None = None,
+        segmentation_head: nn.Module | None = None,
         contrastive_head: nn.Module | None = None,
         mae_decoder: MAEDecoder | None = None,
         augmentations: nn.Module | None = None,
@@ -96,6 +97,8 @@ class MultiHeadMicroscopyModel(nn.Module):
         use_mae: bool = False,
         mask_ratio: float = 0.75,
         temperature: float = 0.5,
+        segmentation_head_name: str = "segmentation",
+        segmentation_head_kwargs: Mapping[str, object] | None = None,
     ) -> MultiHeadMicroscopyModel:
         """Build common classification/segmentation/SSL heads."""
         classification_head = (
@@ -104,10 +107,12 @@ class MultiHeadMicroscopyModel(nn.Module):
             else None
         )
         segmentation_head = (
-            SegmentationHead(
-                encoder.embed_dim,
-                num_segmentation_classes,
-                encoder.patch_size,
+            build_head(
+                segmentation_head_name,
+                embed_dim=encoder.embed_dim,
+                num_classes=num_segmentation_classes,
+                patch_size=encoder.patch_size,
+                **dict(segmentation_head_kwargs or {}),
             )
             if num_segmentation_classes is not None
             else None

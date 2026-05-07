@@ -43,6 +43,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--val-images", required=True)
     parser.add_argument("--val-annotations", required=True)
     parser.add_argument("--encoder", default="eupe")
+    parser.add_argument(
+        "--segmentation-head",
+        choices=("segmentation", "upernet"),
+        default="upernet",
+        help="Decoder head for dense masks. upernet adds pyramid pooling and FPN fusion.",
+    )
+    parser.add_argument(
+        "--decoder-channels",
+        type=int,
+        default=None,
+        help="Optional UPerNet decoder width. Defaults to min(embed_dim, 256).",
+    )
     parser.add_argument("--image-size", type=int, default=224)
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--batch-size", type=int, default=4)
@@ -83,12 +95,20 @@ def train_supervised_baseline(
     lr: float,
     segmentation_loss: str,
     dice_weight: float,
+    segmentation_head: str,
+    decoder_channels: int | None,
 ) -> tuple[MultiHeadMicroscopyModel, float]:
     model = MultiHeadMicroscopyModel.with_default_heads(
         encoder,
         num_segmentation_classes=num_classes,
         use_contrastive=False,
         use_mae=False,
+        segmentation_head_name=segmentation_head,
+        segmentation_head_kwargs=(
+            {"decoder_channels": decoder_channels}
+            if decoder_channels is not None
+            else None
+        ),
     ).to(device)
     trainer = MultiHeadMicroscopyTrainer(
         model,
@@ -119,12 +139,20 @@ def train_multihead(
     ssl_weight: float,
     segmentation_loss: str,
     dice_weight: float,
+    segmentation_head: str,
+    decoder_channels: int | None,
 ) -> tuple[MultiHeadMicroscopyModel, float]:
     model = MultiHeadMicroscopyModel.with_default_heads(
         encoder,
         num_segmentation_classes=num_classes,
         use_contrastive=True,
         use_mae=False,
+        segmentation_head_name=segmentation_head,
+        segmentation_head_kwargs=(
+            {"decoder_channels": decoder_channels}
+            if decoder_channels is not None
+            else None
+        ),
     ).to(device)
     trainer = MultiHeadMicroscopyTrainer(
         model,
@@ -211,6 +239,8 @@ def main() -> None:
         lr=args.lr,
         segmentation_loss=args.segmentation_loss,
         dice_weight=args.dice_weight,
+        segmentation_head=args.segmentation_head,
+        decoder_channels=args.decoder_channels,
     )
     baseline_miou = evaluate_miou(
         baseline_model,
@@ -230,6 +260,8 @@ def main() -> None:
         ssl_weight=args.ssl_weight,
         segmentation_loss=args.segmentation_loss,
         dice_weight=args.dice_weight,
+        segmentation_head=args.segmentation_head,
+        decoder_channels=args.decoder_channels,
     )
     multihead_miou = evaluate_miou(
         multihead_model,
@@ -246,6 +278,11 @@ def main() -> None:
             "dataset": args.dataset,
             "metric_name": "miou",
             "miou": multihead_miou,
+            "encoder": args.encoder,
+            "segmentation_head": args.segmentation_head,
+            "decoder_channels": args.decoder_channels,
+            "segmentation_loss": args.segmentation_loss,
+            "image_size": args.image_size,
         },
         checkpoint_path,
     )

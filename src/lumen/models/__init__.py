@@ -14,6 +14,7 @@ from lumen.models.heads import (
     DetectionHead,
     KeypointHead,
     SegmentationHead,
+    UPerNetSegmentationHead,
 )
 from lumen.models.registry import (
     build_encoder,
@@ -59,6 +60,7 @@ __all__ = [
     "SegmenterBase",
     "SegmenterProtocol",
     "Trainability",
+    "UPerNetSegmentationHead",
     "build_encoder",
     "build_head",
     "build_segmenter",

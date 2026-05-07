@@ -126,6 +126,18 @@ class TestHeadRegistry:
         logits = head(tokens, image_size=(64, 64))
         assert logits.shape == (1, 3, 64, 64)
 
+    def test_build_upernet_segmentation_head(self) -> None:
+        head = build_head(
+            "upernet",
+            embed_dim=32,
+            num_classes=3,
+            patch_size=16,
+            decoder_channels=16,
+        )
+        tokens = torch.randn(1, 16, 32)
+        logits = head(tokens, image_size=(64, 64))
+        assert logits.shape == (1, 3, 64, 64)
+
     def test_build_task_model(self) -> None:
         encoder = build_encoder("eupe", embed_dim=64, depth=2, num_heads=4)
         model = build_task_model(encoder, task="segmentation", num_classes=2)

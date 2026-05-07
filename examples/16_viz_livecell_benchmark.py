@@ -36,6 +36,19 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--benchmark", default=".benchmarks/livecell_multihead.json")
     parser.add_argument("--checkpoint", default="weights/livecell/lumen_multihead.pt")
+    parser.add_argument("--encoder", default="eupe-pretrained")
+    parser.add_argument(
+        "--segmentation-head",
+        choices=("auto", "segmentation", "upernet"),
+        default="auto",
+        help="Decoder used by the checkpoint. auto reads checkpoint metadata when present.",
+    )
+    parser.add_argument(
+        "--decoder-channels",
+        type=int,
+        default=None,
+        help="Optional UPerNet decoder width when checkpoint metadata is absent.",
+    )
     parser.add_argument(
         "--val-images",
         default="data/livecell/LIVECell_dataset_2021/images/livecell_train_val_images",
@@ -63,15 +76,32 @@ def parse_args() -> argparse.Namespace:
 
 
 def load_model(
-    checkpoint_path: str | Path, num_classes: int
+    checkpoint_path: str | Path,
+    num_classes: int,
+    *,
+    encoder_name: str,
+    segmentation_head: str,
+    decoder_channels: int | None,
 ) -> MultiHeadMicroscopyModel:
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-    encoder = build_encoder("eupe-pretrained")
+    encoder = build_encoder(str(checkpoint.get("encoder", encoder_name)))
+    head_name = (
+        str(checkpoint.get("segmentation_head", "segmentation"))
+        if segmentation_head == "auto"
+        else segmentation_head
+    )
+    checkpoint_decoder_channels = checkpoint.get("decoder_channels", decoder_channels)
     model = MultiHeadMicroscopyModel.with_default_heads(
         encoder,
         num_segmentation_classes=num_classes,
         use_contrastive=True,
         use_mae=False,
+        segmentation_head_name=head_name,
+        segmentation_head_kwargs=(
+            {"decoder_channels": int(checkpoint_decoder_channels)}
+            if checkpoint_decoder_channels is not None
+            else None
+        ),
     )
     model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()
@@ -184,7 +214,13 @@ def main() -> None:
         args.val_annotations,
         image_size=args.image_size,
     )
-    model = load_model(args.checkpoint, dataset.num_classes)
+    model = load_model(
+        args.checkpoint,
+        dataset.num_classes,
+        encoder_name=args.encoder,
+        segmentation_head=args.segmentation_head,
+        decoder_channels=args.decoder_channels,
+    )
     selected = select_samples(dataset, model, args.num_samples, args.scan_samples)
     n = len(selected)
 

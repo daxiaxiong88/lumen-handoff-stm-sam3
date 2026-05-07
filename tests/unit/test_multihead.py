@@ -105,6 +105,29 @@ class TestMultiHeadMicroscopyTrainer:
         assert {"loss", "segmentation"}.issubset(metrics)
         assert metrics["segmentation"] >= 0.0
 
+    def test_upernet_segmentation_head_runs(
+        self,
+        tiny_encoder: EUPEEncoder,
+    ) -> None:
+        model = MultiHeadMicroscopyModel.with_default_heads(
+            tiny_encoder,
+            num_segmentation_classes=2,
+            use_contrastive=False,
+            use_mae=False,
+            segmentation_head_name="upernet",
+            segmentation_head_kwargs={"decoder_channels": 16},
+        )
+        trainer = MultiHeadMicroscopyTrainer(model, lr=1e-4)
+
+        metrics = trainer.train_step(
+            {
+                "image": torch.randn(1, 1, 64, 64),
+                "mask": torch.randint(0, 2, (1, 64, 64)),
+            }
+        )
+
+        assert metrics["segmentation"] >= 0.0
+
     def test_mae_branch_runs(self, tiny_encoder: EUPEEncoder) -> None:
         model = MultiHeadMicroscopyModel.with_default_heads(
             tiny_encoder,
