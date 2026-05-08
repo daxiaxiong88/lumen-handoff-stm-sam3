@@ -35,7 +35,7 @@ def _repo_root_from_here() -> Path:
 def _ensure_vendor_on_path(vendor_dir: str | Path | None = None) -> Path:
     repo_root = _repo_root_from_here()
     vendor_path = (
-        Path(vendor_dir) if vendor_dir is not None else repo_root / "vandor" / "EUPE"
+        Path(vendor_dir) if vendor_dir is not None else repo_root / "vendor" / "EUPE"
     )
     if not vendor_path.exists():
         raise FileNotFoundError(f"Vendor EUPE directory does not exist: {vendor_path}")
@@ -46,7 +46,7 @@ def _ensure_vendor_on_path(vendor_dir: str | Path | None = None) -> Path:
 
 
 class EUPEEncoder(EncoderBase):
-    """Lumen adapter around the official local ``vandor/EUPE`` ViT encoder.
+    """Lumen adapter around the official local ``vendor/EUPE`` ViT encoder.
 
     This class is intentionally thin: all patch embedding, RoPE position
     encoding, attention blocks, normalization, and checkpoint compatibility

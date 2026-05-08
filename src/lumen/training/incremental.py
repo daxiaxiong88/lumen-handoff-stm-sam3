@@ -368,8 +368,6 @@ class IncrementalTrainer(nn.Module):
             loss.backward()
             self.base_trainer.optimizer.step()
 
-        if self.base_trainer.scheduler is not None:
-            self.base_trainer.scheduler.step()
 
         return {"loss": loss.item()}
 
