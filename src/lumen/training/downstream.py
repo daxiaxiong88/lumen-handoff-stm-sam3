@@ -203,8 +203,6 @@ class SegmentationTrainer(nn.Module):
             loss.backward()
             self.optimizer.step()
 
-        if self.scheduler is not None:
-            self.scheduler.step()
 
         return {"loss": loss.item()}
 
@@ -417,8 +415,6 @@ class DetectionTrainer(nn.Module):
             loss.backward()
             self.optimizer.step()
 
-        if self.scheduler is not None:
-            self.scheduler.step()
 
         return {"loss": loss.item()}
 
@@ -560,7 +556,5 @@ class KeypointTrainer(nn.Module):
             loss.backward()
             self.optimizer.step()
 
-        if self.scheduler is not None:
-            self.scheduler.step()
 
         return {"loss": loss.item()}

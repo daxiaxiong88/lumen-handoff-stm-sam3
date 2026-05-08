@@ -8,6 +8,19 @@ from typing import Any, get_args, get_origin, get_type_hints
 import yaml
 
 
+
+# Field aliases for backward compatibility
+FIELD_ALIASES = {
+    "in_chans": "in_channels",
+    "drop_rate": "dropout",
+    "img_size": "image_size",
+}
+
+
+def _resolve_field_alias(key: str) -> str:
+    """Resolve configuration field aliases to canonical names."""
+    return FIELD_ALIASES.get(key, key)
+
 @dataclass
 class ModelConfig:
     """Encoder architecture sub-configuration.

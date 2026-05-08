@@ -24,6 +24,7 @@ dependencies = [
     "einops>=0.7",
     "timm>=0.9",
     "supervision>=0.28.0",
+    "roboflow>=1.1.0",
 ]
 
 [project.optional-dependencies]
@@ -34,6 +35,13 @@ dev = [
     "ruff>=0.0.285",
     "mypy>=1.5",
     "pre-commit>=3.3",
+]
+roboflow = [
+    "scikit-image>=0.21",
+]
+transformers = [
+    "transformers>=4.30",
+    "modelscope>=1.4",
 ]
 
 [build-system]

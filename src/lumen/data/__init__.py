@@ -13,6 +13,28 @@ from lumen.data.dataset import (
     load_image_array,
     resize_chw,
 )
+try:
+    from lumen.data.roboflow import (
+        ROBOFLOW_AVAILABLE,
+        RoboflowClassificationDataset,
+        RoboflowDatasetConfig,
+        RoboflowDetectionDataset,
+        RoboflowSegmentationDataset,
+        build_roboflow_dataset,
+        list_roboflow_projects,
+    )
+except ImportError:
+    ROBOFLOW_AVAILABLE = False
+
+    class RoboflowDatasetConfig:
+        pass
+
+    def build_roboflow_dataset(*args, **kwargs):
+        raise ImportError("Roboflow package not installed. Install with: pip install roboflow")
+
+    def list_roboflow_projects(*args, **kwargs):
+        raise ImportError("Roboflow package not installed")
+
 from lumen.data.supervision_bridge import (
     SupervisionBridge,
     detection_head_to_detections,
@@ -32,6 +54,13 @@ __all__ = [
     "STEMDataset",
     "SupervisionBridge",
     "UnlabeledScientificImageDataset",
+    "ROBOFLOW_AVAILABLE",
+    "RoboflowClassificationDataset",
+    "RoboflowDatasetConfig",
+    "RoboflowDetectionDataset",
+    "RoboflowSegmentationDataset",
+    "build_roboflow_dataset",
+    "list_roboflow_projects",
     "default_seg_aug",
     "detection_head_to_detections",
     "ensure_channel_count",

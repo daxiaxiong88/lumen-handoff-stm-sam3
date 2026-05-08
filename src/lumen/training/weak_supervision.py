@@ -346,9 +346,6 @@ class WeakSupervisionTrainer(nn.Module):
             loss.backward()
             self.base_trainer.optimizer.step()
 
-        if self.base_trainer.scheduler is not None:
-            self.base_trainer.scheduler.step()
-
         if self.mean_teacher is not None:
             self.mean_teacher.update()
 
