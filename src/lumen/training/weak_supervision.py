@@ -175,9 +175,11 @@ class CoTeaching:
         if self._epoch == 0:
             return self.forget_rate
         if self._epoch < self.num_gradual:
-            return self.forget_rate * (
-                self._epoch / self.num_gradual
-            ) ** self.exponent
+            return float(
+                self.forget_rate * (
+                    self._epoch / self.num_gradual
+                ) ** self.exponent
+            )
         return self.forget_rate
 
     def select_samples(
@@ -252,7 +254,7 @@ class WeakSupervisionTrainer(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass through base trainer."""
-        return self.base_trainer.forward(x)
+        return self.base_trainer.forward(x)  # type: ignore[no-any-return]
 
     def compute_loss(
         self,
@@ -273,7 +275,7 @@ class WeakSupervisionTrainer(nn.Module):
         Returns:
             Total loss scalar.
         """
-        loss = self.base_trainer.compute_loss(logits, targets)
+        loss: torch.Tensor = self.base_trainer.compute_loss(logits, targets)  # type: ignore[operator,assignment]
 
         if unlabeled is not None and self.pseudo_weight > 0:
             pseudo_labels, mask = self.pseudo_labeler.generate(
@@ -299,7 +301,7 @@ class WeakSupervisionTrainer(nn.Module):
         if self.mean_teacher is not None and self.consistency_weight > 0:
             consistency_inputs = unlabeled if unlabeled is not None else labeled_inputs
             if consistency_inputs is None:
-                return loss
+                return loss  # type: ignore[no-any-return]
             with torch.no_grad():
                 teacher_logits = self.mean_teacher.teacher(consistency_inputs)
             student_logits = self.base_trainer(consistency_inputs)
@@ -312,7 +314,7 @@ class WeakSupervisionTrainer(nn.Module):
             )
             loss = loss + self.consistency_weight * c_loss
 
-        return loss
+        return loss  # type: ignore[no-any-return]
 
     def train_step(self, batch: dict[str, Any]) -> dict[str, float]:
         """Single training step with weak supervision.
@@ -325,26 +327,31 @@ class WeakSupervisionTrainer(nn.Module):
             Dictionary with ``"loss"`` key.
         """
         x = batch["image"]
-        targets = batch.get("mask") if "mask" in batch else batch.get("targets") if "targets" in batch else batch.get("keypoints")
+        targets: Any = (
+            batch.get("mask") if "mask" in batch
+            else batch.get("targets") if "targets" in batch
+            else batch.get("keypoints")
+        )
         unlabeled = batch.get("unlabeled")
 
-        self.base_trainer.optimizer.zero_grad()
+        optimizer: torch.optim.Optimizer = self.base_trainer.optimizer  # type: ignore[assignment]
+        optimizer.zero_grad()
 
-        if (
-            getattr(self.base_trainer, "mixed_precision", False)
-            and getattr(self.base_trainer, "scaler", None) is not None
-        ):
+        scaler: torch.amp.GradScaler | None = getattr(self.base_trainer, "scaler", None)  # type: ignore[assignment]
+        mixed: bool = getattr(self.base_trainer, "mixed_precision", False)
+
+        if mixed and scaler is not None:
             with torch.autocast(device_type=x.device.type):
                 logits = self.forward(x)
                 loss = self.compute_loss(logits, targets, unlabeled, labeled_inputs=x)
-            self.base_trainer.scaler.scale(loss).backward()
-            self.base_trainer.scaler.step(self.base_trainer.optimizer)
-            self.base_trainer.scaler.update()
+            scaler.scale(loss).backward()  # type: ignore[no-any-return]
+            scaler.step(optimizer)
+            scaler.update()
         else:
             logits = self.forward(x)
             loss = self.compute_loss(logits, targets, unlabeled, labeled_inputs=x)
             loss.backward()
-            self.base_trainer.optimizer.step()
+            optimizer.step()
 
         if self.mean_teacher is not None:
             self.mean_teacher.update()

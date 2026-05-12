@@ -289,7 +289,7 @@ class WeightManager:
             key,
             checkpoint.get("epoch", "?"),
         )
-        return checkpoint
+        return checkpoint  # type: ignore[no-any-return]
 
     def list_tags(self) -> list[str]:
         """List all version tags in the dataset."""

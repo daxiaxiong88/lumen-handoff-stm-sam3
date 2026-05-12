@@ -331,7 +331,7 @@ def keypoints_to_supervision(
     if class_id is None:
         cls_arr = np.zeros((n_objects,), dtype=int)
     elif np.isscalar(class_id):
-        cls_arr = np.full((n_objects,), int(class_id), dtype=int)
+        cls_arr = np.full((n_objects,), int(class_id), dtype=int)  # type: ignore[arg-type]
     else:
         cls_arr = np.asarray(class_id, dtype=int)
         if cls_arr.shape != (n_objects,):

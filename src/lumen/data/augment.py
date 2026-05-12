@@ -100,7 +100,7 @@ class RandomBrightnessContrast(BaseTransform):
 
     def apply_image(self, image: torch.Tensor, params: dict) -> torch.Tensor:
         out = image * params["c"] + params["b"]
-        return out.clamp(0.0, 1.0)
+        return out.clamp(0.0, 1.0)  # type: ignore[no-any-return]
 
 
 @dataclass
@@ -132,7 +132,7 @@ class GaussianNoise(BaseTransform):
 
     def apply_image(self, image: torch.Tensor, params: dict) -> torch.Tensor:
         noise = torch.randn_like(image) * params["std"]
-        return (image + noise).clamp(0.0, 1.0)
+        return (image + noise).clamp(0.0, 1.0)  # type: ignore[no-any-return]
 
 
 @dataclass
@@ -149,7 +149,7 @@ class PoissonNoise(BaseTransform):
 
     def apply_image(self, image: torch.Tensor, params: dict) -> torch.Tensor:
         noise = torch.randn_like(image) * params["scale"] * image.clamp_min(0).sqrt()
-        return (image + noise).clamp(0.0, 1.0)
+        return (image + noise).clamp(0.0, 1.0)  # type: ignore[no-any-return]
 
 
 @dataclass

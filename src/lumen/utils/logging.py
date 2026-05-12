@@ -114,7 +114,7 @@ class TrainingHistory:
             json.dump({"meta": self.meta, "records": self.records}, fh, indent=2)
 
     @classmethod
-    def load(cls, path: str) -> "TrainingHistory":
+    def load(cls, path: str) -> TrainingHistory:
         """Read a history JSON written by :meth:`save`."""
         with open(path) as fh:
             data = json.load(fh)
@@ -222,7 +222,7 @@ def load_checkpoint(
         model.load_state_dict(state["model_state_dict"], strict=strict)
     else:
         model.load_state_dict(state, strict=strict)
-    return state
+    return state  # type: ignore[no-any-return]
 
 
 __all__ = [

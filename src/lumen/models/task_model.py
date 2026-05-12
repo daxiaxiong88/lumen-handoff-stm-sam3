@@ -16,14 +16,14 @@ Trainability = Literal[
 ]
 
 
-def set_module_trainable(module: nn.Module, trainable: bool) -> None:
+def set_module_trainable(module: nn.Module | EncoderProtocol, trainable: bool) -> None:
     """Set ``requires_grad`` on every parameter in ``module``."""
     for param in module.parameters():
         param.requires_grad = trainable
 
 
 def split_encoder_head_parameters(
-    encoder: nn.Module,
+    encoder: nn.Module | EncoderProtocol,
     head: nn.Module,
     *,
     trainability: Trainability = "encoder_and_head",

@@ -27,13 +27,13 @@ try:
 except ImportError:
     ROBOFLOW_AVAILABLE = False
 
-    class RoboflowDatasetConfig:
+    class RoboflowDatasetConfig:  # type: ignore[no-redef]
         pass
 
-    def build_roboflow_dataset(*args, **kwargs):
+    def build_roboflow_dataset(*args: object, **kwargs: object) -> object:
         raise ImportError("Roboflow package not installed. Install with: pip install roboflow")
 
-    def list_roboflow_projects(*args, **kwargs):
+    def list_roboflow_projects(*args: object, **kwargs: object) -> object:
         raise ImportError("Roboflow package not installed")
 
 try:

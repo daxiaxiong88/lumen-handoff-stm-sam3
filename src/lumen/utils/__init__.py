@@ -10,17 +10,6 @@ from lumen.utils.checkpoint_manager import (
     ExperimentConfig,
     create_config_hash,
 )
-from lumen.utils.fewshot import (
-    EpisodeSampler,
-    FewShotConfig,
-    FewShotResult,
-    FewShotSummary,
-    evaluate_few_shot_episode,
-    few_shot_learning_curve,
-    load_few_shot_results,
-    run_few_shot_evaluation,
-    save_few_shot_results,
-)
 from lumen.utils.config import (
     ClassificationDownstreamConfig,
     DataConfig,
@@ -37,6 +26,17 @@ from lumen.utils.config import (
     TrainingConfig,
     load_config,
     load_config_from_env,
+)
+from lumen.utils.fewshot import (
+    EpisodeSampler,
+    FewShotConfig,
+    FewShotResult,
+    FewShotSummary,
+    evaluate_few_shot_episode,
+    few_shot_learning_curve,
+    load_few_shot_results,
+    run_few_shot_evaluation,
+    save_few_shot_results,
 )
 from lumen.utils.logging import (
     ExperimentLogger,

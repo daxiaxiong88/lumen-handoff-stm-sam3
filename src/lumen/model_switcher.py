@@ -10,15 +10,13 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import torch
 import torch.nn as nn
 
 from lumen.models.encoder_base import EncoderProtocol
-from lumen.models.registry import build_encoder, list_encoders
-from lumen.models.heads import ClassificationHead
-from lumen.models.registry import build_head, list_heads
+from lumen.models.registry import build_encoder, list_encoders, list_heads
 from lumen.training.multihead import (
     HomoscedasticUncertaintyBalancer,
     MultiHeadMicroscopyModel,
@@ -46,7 +44,7 @@ class ModelSwitchConfig:
     encoder_name: str = "eupe"
     encoder_kwargs: dict[str, Any] = field(default_factory=dict)
     segmentation_head_name: str = "segmentation"
-    segmentation_num_classes: int = 2
+    segmentation_num_classes: int | None = 2
     classification_num_classes: int | None = None
     use_contrastive: bool = True
     use_mae: bool = False

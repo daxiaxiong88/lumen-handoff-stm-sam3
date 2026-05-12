@@ -84,11 +84,11 @@ def train_epoch(
     for batch in dataloader:
         batch = move_batch_to_device(batch, device)
         if internal_opt is not None:
-            metrics = trainer.train_step(batch)
+            metrics = trainer.train_step(batch)  # type: ignore[operator]
         else:
             assert optimizer is not None  # narrowed above
             optimizer.zero_grad(set_to_none=True)
-            metrics = trainer.train_step(batch)
+            metrics = trainer.train_step(batch)  # type: ignore[operator]
             loss = metrics["loss"]
             if not torch.is_tensor(loss):
                 raise TypeError(

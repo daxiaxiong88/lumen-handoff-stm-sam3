@@ -75,7 +75,7 @@ def _load_sam3_model(
 
     target = torch.device("cpu" if device is None else device)
     src = Path(model_dir) if model_dir is not None else _default_model_dir()
-    model = Sam3Model.from_pretrained(src, local_files_only=local_files_only).to(target)
+    model = Sam3Model.from_pretrained(src, local_files_only=local_files_only).to(target)  # type: ignore[arg-type]
     processor = Sam3Processor.from_pretrained(src, local_files_only=local_files_only)
     return model, processor
 
@@ -122,7 +122,7 @@ class Sam3ImageEncoder(EncoderBase):
                 f"Expected {self.in_channels} channel(s), got {x.shape[1]}"
             )
         out = self.vision_encoder(pixel_values=x.float())
-        return out.last_hidden_state
+        return out.last_hidden_state  # type: ignore[no-any-return]
 
     def resize_for_inference(
         self,

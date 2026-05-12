@@ -65,12 +65,43 @@ select = ["E", "F", "I", "W", "N", "UP", "B", "C4", "SIM"]
 ignore = ["E501"]
 
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.10"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
+exclude = ["\\.venv"]
+
+[[tool.mypy.overrides]]
+module = [
+    "lumen.data.roboflow",
+    "hyperdata.*",
+    "hyperspy.*",
+    "pycocotools.*",
+    "sklearn.*",
+    "cv2.*",
+    "supervision.*",
+    "scipy.*",
+    "skimage.*",
+    "einops.*",
+    "timm.*",
+    "eupe.*",
+    "tensorboard.*",
+    "matplotlib.*",
+    "transformers.*",
+]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["tifffile"]
+follow_imports = "skip"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = ""
+
+[dependency-groups]
+dev = [
+    "types-pyyaml>=6.0.12.20250915",
+    "types-tqdm>=4.67.3.20260205",
+]

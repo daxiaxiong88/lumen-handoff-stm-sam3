@@ -22,6 +22,7 @@ Two surfaces are provided:
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from typing import Protocol, runtime_checkable
 
 import torch
@@ -48,6 +49,12 @@ class EncoderProtocol(Protocol):
     def forward_masked_tokens(
         self, x: torch.Tensor, mask: torch.Tensor
     ) -> torch.Tensor: ...
+
+    def parameters(self) -> Iterator[nn.Parameter]: ...
+
+    def load_state_dict(
+        self, state_dict: dict[str, object], strict: bool = True
+    ) -> object: ...
 
 
 class EncoderBase(nn.Module):

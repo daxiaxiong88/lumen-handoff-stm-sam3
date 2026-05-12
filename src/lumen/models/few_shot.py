@@ -169,7 +169,7 @@ class FewShotFeatureMatcher:
         if image.dim() != 3:
             raise ValueError(f"Expected CHW or HW image, got {tuple(image.shape)}")
         _, h, w = image.shape
-        patch_size = int(self.encoder.patch_size)
+        patch_size = int(self.encoder.patch_size)  # type: ignore[arg-type]
         image_size = ((h // patch_size) * patch_size, (w // patch_size) * patch_size)
         if image_size[0] <= 0 or image_size[1] <= 0:
             raise ValueError("Image is smaller than one encoder patch")
@@ -183,7 +183,7 @@ class FewShotFeatureMatcher:
         return image, image_size
 
     def _grid_size(self, image_size: tuple[int, int]) -> tuple[int, int]:
-        patch_size = int(self.encoder.patch_size)
+        patch_size = int(self.encoder.patch_size)  # type: ignore[arg-type]
         return image_size[0] // patch_size, image_size[1] // patch_size
 
     def _mask_to_patch_labels(
@@ -209,7 +209,7 @@ class FewShotFeatureMatcher:
         best_fraction, best_idx = stacked.max(dim=0)
         patch_labels = labels[best_idx]
         patch_labels[best_fraction < self.min_patch_fraction] = -1
-        return patch_labels
+        return patch_labels  # type: ignore[no-any-return]
 
     def _make_prototypes(self, features: torch.Tensor) -> list[torch.Tensor]:
         if self.max_prototypes_per_class <= 1 or features.shape[0] < 2:
@@ -224,7 +224,7 @@ class FewShotFeatureMatcher:
             next_idx = dists.min(dim=0).values.argmax()
             centers.append(features[next_idx])
         assignments = torch.stack([features @ c for c in centers]).argmax(dim=0)
-        return [features[assignments == i].mean(dim=0) for i in range(count)]
+        return [features[assignments == i].mean(dim=0) for i in range(count)]  # type: ignore[no-any-return]
 
 
 def _label_to_color(label: int) -> torch.Tensor:

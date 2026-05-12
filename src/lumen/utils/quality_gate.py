@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Any
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as nn_functional
@@ -109,7 +107,7 @@ class OODDetector:
                 raise RuntimeError("OODDetector must be fit before scoring")
             diff = features - self.mean
             scores = (diff @ self.cov_inv * diff).sum(dim=-1)
-            return scores
+            return scores  # type: ignore[no-any-return]
 
         # Energy score: negative log-sum-exp of logits
         # If features are not logits, treat them as logits directly
@@ -133,10 +131,7 @@ class OODDetector:
         scores = self.score(x)
         if threshold is None:
             threshold = scores.median().item()
-        if self.method == "mahalanobis":
-            ood = scores > threshold
-        else:
-            ood = scores < threshold
+        ood = scores > threshold if self.method == "mahalanobis" else scores < threshold
         return ood, ~ood
 
 

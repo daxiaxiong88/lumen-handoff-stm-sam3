@@ -128,7 +128,7 @@ class HyperDataImageDataset(Dataset):
         )
 
     def __len__(self) -> int:
-        return self._length
+        return int(self._length)
 
     def __getitem__(self, index: int) -> dict[str, Any]:
         raw = self._array[index]
@@ -209,7 +209,7 @@ class HyperDataSegmentationDataset(Dataset):
         )
 
     def __len__(self) -> int:
-        return self._length
+        return int(self._length)
 
     def __getitem__(self, index: int) -> dict[str, Any]:
         img_raw = self._images[index]

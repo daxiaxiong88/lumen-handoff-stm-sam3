@@ -117,12 +117,12 @@ class EUPEEncoder(EncoderBase):
     @property
     def patch_embed(self) -> nn.Module:
         """Official vendor patch embedding module."""
-        return self.model.patch_embed
+        return self.model.patch_embed  # type: ignore[no-any-return]
 
     @property
     def blocks(self) -> nn.ModuleList:
         """Official vendor transformer blocks."""
-        return self.model.blocks
+        return self.model.blocks  # type: ignore[no-any-return]
 
     def preprocess(self, x: torch.Tensor) -> torch.Tensor:
         """Adapt scientific image channels to the configured EUPE input."""
@@ -143,7 +143,7 @@ class EUPEEncoder(EncoderBase):
         """Return official EUPE normalized patch tokens."""
         x = self.preprocess(x)
         features = self.model.forward_features(x)
-        return features["x_norm_patchtokens"]
+        return features["x_norm_patchtokens"]  # type: ignore[no-any-return]
 
     def forward_masked_tokens(
         self, x: torch.Tensor, mask: torch.Tensor
@@ -151,7 +151,7 @@ class EUPEEncoder(EncoderBase):
         """Return EUPE patch tokens after replacing masked patches in-encoder."""
         x = self.preprocess(x)
         features = self.model.forward_features(x, masks=mask)
-        return features["x_norm_patchtokens"]
+        return features["x_norm_patchtokens"]  # type: ignore[no-any-return]
 
     def get_config(self) -> EUPEConfig:
         """Return the encoder configuration."""

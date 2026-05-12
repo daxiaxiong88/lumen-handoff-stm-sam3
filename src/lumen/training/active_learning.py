@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import abc
-from typing import Any
 
 import torch
 import torch.nn as nn
@@ -126,15 +125,15 @@ class DiversitySampler(QueryStrategy):
         """Extract features from encoder or model."""
         if self.feature_extractor is not None:
             with torch.no_grad():
-                return self.feature_extractor(x)
+                return self.feature_extractor(x)  # type: ignore[no-any-return]
         # Try common encoder attributes
         if hasattr(model, "encoder"):
             with torch.no_grad():
-                return model.encoder(x)
+                return model.encoder(x)  # type: ignore[operator,no-any-return]
         # Fallback: use model output and flatten
         with torch.no_grad():
             out = model(x)
-        return out.view(out.shape[0], -1)
+        return out.view(out.shape[0], -1)  # type: ignore[no-any-return]
 
     def select_batch(
         self,
@@ -166,7 +165,7 @@ class DiversitySampler(QueryStrategy):
             dists = torch.cdist(features, features[centers])
             min_dists = dists.min(dim=1)[0]
             next_idx = min_dists.argmax().item()
-            centers.append(next_idx)
+            centers.append(int(next_idx))
 
         # Assign each sample to nearest center
         dists = torch.cdist(features, features[centers])
@@ -268,5 +267,5 @@ class BatchActiveLearner:
                 score += self.diversity_weight
             combined_scores[idx] = score
 
-        sorted_indices = sorted(combined_scores, key=combined_scores.get, reverse=True)
+        sorted_indices = sorted(combined_scores, key=lambda idx: combined_scores[idx], reverse=True)
         return sorted_indices[:n]

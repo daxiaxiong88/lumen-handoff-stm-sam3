@@ -159,7 +159,7 @@ class SegmentationTrainer(nn.Module):
             Segmentation logits of shape ``(B, num_classes, H, W)``.
         """
         feats = self.encoder(x)
-        return self.head(feats, image_size=x.shape[2:])
+        return self.head(feats, image_size=x.shape[2:])  # type: ignore[no-any-return]
 
     def compute_loss(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         """Segmentation loss.
@@ -171,7 +171,7 @@ class SegmentationTrainer(nn.Module):
         Returns:
             Scalar loss tensor.
         """
-        return self.criterion(logits, targets)
+        return self.criterion(logits, targets)  # type: ignore[no-any-return]
 
     def train_step(self, batch: dict[str, Any]) -> dict[str, float]:
         """Single training step.
@@ -184,25 +184,26 @@ class SegmentationTrainer(nn.Module):
         """
         x = batch["image"]
         targets = batch["mask"]
-        self.optimizer.zero_grad()
+        optimizer: torch.optim.Optimizer = self.optimizer  # type: ignore[assignment]
+        scaler: torch.amp.GradScaler | None = self.scaler  # type: ignore[assignment]
+        optimizer.zero_grad()
 
         if self.mixed_precision:
             with torch.autocast(device_type=x.device.type):
                 logits = self.forward(x)
                 loss = self.compute_loss(logits, targets)
-            if self.scaler is not None:
-                self.scaler.scale(loss).backward()
-                self.scaler.step(self.optimizer)
-                self.scaler.update()
+            if scaler is not None:
+                scaler.scale(loss).backward()  # type: ignore[no-any-return]
+                scaler.step(optimizer)
+                scaler.update()
             else:
                 loss.backward()
-                self.optimizer.step()
+                optimizer.step()
         else:
             logits = self.forward(x)
             loss = self.compute_loss(logits, targets)
             loss.backward()
-            self.optimizer.step()
-
+            optimizer.step()
 
         return {"loss": loss.item()}
 
@@ -305,7 +306,7 @@ class DetectionTrainer(nn.Module):
             (class_logits, bbox_preds, objectness_logits).
         """
         feats = self.encoder(x)
-        return self.head(feats)
+        return self.head(feats)  # type: ignore[no-any-return]
 
     def compute_loss(
         self,
@@ -383,7 +384,7 @@ class DetectionTrainer(nn.Module):
             pred_bboxes, valid_targets_bboxes, reduction="mean"
         )
 
-        return cls_loss + bbox_loss + obj_loss
+        return cls_loss + bbox_loss + obj_loss  # type: ignore[no-any-return]
 
     def train_step(self, batch: dict[str, Any]) -> dict[str, float]:
         """Single training step.
@@ -396,25 +397,26 @@ class DetectionTrainer(nn.Module):
         """
         x = batch["image"]
         targets = batch["targets"]
-        self.optimizer.zero_grad()
+        optimizer: torch.optim.Optimizer = self.optimizer  # type: ignore[assignment]
+        scaler: torch.amp.GradScaler | None = self.scaler  # type: ignore[assignment]
+        optimizer.zero_grad()
 
         if self.mixed_precision:
             with torch.autocast(device_type=x.device.type):
                 class_logits, bbox_preds, obj_logits = self.forward(x)
                 loss = self.compute_loss(class_logits, bbox_preds, obj_logits, targets)
-            if self.scaler is not None:
-                self.scaler.scale(loss).backward()
-                self.scaler.step(self.optimizer)
-                self.scaler.update()
+            if scaler is not None:
+                scaler.scale(loss).backward()  # type: ignore[no-any-return]
+                scaler.step(optimizer)
+                scaler.update()
             else:
                 loss.backward()
-                self.optimizer.step()
+                optimizer.step()
         else:
             class_logits, bbox_preds, obj_logits = self.forward(x)
             loss = self.compute_loss(class_logits, bbox_preds, obj_logits, targets)
             loss.backward()
-            self.optimizer.step()
-
+            optimizer.step()
 
         return {"loss": loss.item()}
 
@@ -512,7 +514,7 @@ class KeypointTrainer(nn.Module):
             Keypoint coordinates of shape ``(B, num_keypoints, 2)``.
         """
         feats = self.encoder(x)
-        return self.head(feats)
+        return self.head(feats)  # type: ignore[no-any-return]
 
     def compute_loss(self, preds: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         """MSE loss for keypoint regression.
@@ -524,7 +526,7 @@ class KeypointTrainer(nn.Module):
         Returns:
             Scalar loss tensor.
         """
-        return nn_functional.mse_loss(preds, targets)
+        return nn_functional.mse_loss(preds, targets)  # type: ignore[no-any-return]
 
     def train_step(self, batch: dict[str, Any]) -> dict[str, float]:
         """Single training step.
@@ -537,24 +539,25 @@ class KeypointTrainer(nn.Module):
         """
         x = batch["image"]
         targets = batch["keypoints"]
-        self.optimizer.zero_grad()
+        optimizer: torch.optim.Optimizer = self.optimizer  # type: ignore[assignment]
+        scaler: torch.amp.GradScaler | None = self.scaler  # type: ignore[assignment]
+        optimizer.zero_grad()
 
         if self.mixed_precision:
             with torch.autocast(device_type=x.device.type):
                 preds = self.forward(x)
                 loss = self.compute_loss(preds, targets)
-            if self.scaler is not None:
-                self.scaler.scale(loss).backward()
-                self.scaler.step(self.optimizer)
-                self.scaler.update()
+            if scaler is not None:
+                scaler.scale(loss).backward()  # type: ignore[no-any-return]
+                scaler.step(optimizer)
+                scaler.update()
             else:
                 loss.backward()
-                self.optimizer.step()
+                optimizer.step()
         else:
             preds = self.forward(x)
             loss = self.compute_loss(preds, targets)
             loss.backward()
-            self.optimizer.step()
-
+            optimizer.step()
 
         return {"loss": loss.item()}
