@@ -39,6 +39,9 @@ dev = [
 roboflow = [
     "scikit-image>=0.21",
 ]
+hyperdata = [
+    "hyperdata>=0.1.0",
+]
 transformers = [
     "transformers>=4.30",
     "modelscope>=1.4",
