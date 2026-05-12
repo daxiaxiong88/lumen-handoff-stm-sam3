@@ -15,13 +15,13 @@ from typing import Any
 import numpy as np
 import torch
 import torch.nn.functional as nn_functional
-from torch.utils.data import Dataset, Subset, DataLoader
 from sklearn.metrics import (
     accuracy_score,
     f1_score,
     precision_score,
     recall_score,
 )
+from torch.utils.data import DataLoader, Dataset, Subset
 from tqdm import tqdm
 
 
@@ -89,7 +89,7 @@ class EpisodeSampler:
     def _build_class_indices(self) -> dict[int, list[int]]:
         """Build mapping from class label to dataset indices."""
         class_indices = defaultdict(list)
-        for idx in range(len(self.dataset)):
+        for idx in range(len(self.dataset)):  # type: ignore[arg-type]
             sample = self.dataset[idx]
             label = sample.get("label", sample.get("class"))
             if label is not None:
@@ -134,8 +134,8 @@ class EpisodeSampler:
             support_classes,
         )
 
-    def __iter__(self):
-        for episode in range(self.config.num_episodes):
+    def __iter__(self) -> object:
+        for _episode in range(self.config.num_episodes):
             yield self.sample_episode()
 
 
@@ -177,7 +177,7 @@ def evaluate_few_shot_episode(
             labels = batch["label"].to(device)
 
             with torch.enable_grad():
-                outputs = model.supervised_outputs(images)
+                outputs = model.supervised_outputs(images)  # type: ignore[operator]
                 if "classification" in outputs:
                     logits = outputs["classification"]
                     loss = nn_functional.cross_entropy(logits, labels)
@@ -187,7 +187,7 @@ def evaluate_few_shot_episode(
             images = batch["image"].to(device)
             labels = batch["label"].to(device)
 
-            outputs = model.supervised_outputs(images)
+            outputs = model.supervised_outputs(images)  # type: ignore[operator]
             if "classification" in outputs:
                 logits = outputs["classification"]
                 preds = logits.argmax(dim=-1).cpu().numpy()
@@ -208,10 +208,10 @@ def evaluate_few_shot_episode(
     for class_id in support_classes:
         if class_id in per_class_preds:
             p = per_class_preds[class_id]
-            l = per_class_labels[class_id]
+            gt = per_class_labels[class_id]
             per_class_metrics[class_id] = {
-                "accuracy": accuracy_score(l, p),
-                "f1": f1_score(l, p, average="binary", zero_division=0),
+                "accuracy": accuracy_score(gt, p),
+                "f1": f1_score(gt, p, average="binary", zero_division=0),
             }
         else:
             per_class_metrics[class_id] = {"accuracy": 0.0, "f1": 0.0}
@@ -251,8 +251,8 @@ def run_few_shot_evaluation(
     sampler = EpisodeSampler(dataset, config)
     results: list[FewShotResult] = []
 
-    iterator = tqdm(
-        enumerate(sampler),
+    iterator: Any = tqdm(
+        enumerate(sampler),  # type: ignore[arg-type]
         total=config.num_episodes,
         desc=f"{config.k_shot}-shot {config.n_way}-way",
         disable=not verbose,

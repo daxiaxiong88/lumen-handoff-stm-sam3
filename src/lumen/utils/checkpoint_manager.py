@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import shutil
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -18,7 +18,6 @@ import torch
 import torch.nn as nn
 from typing_extensions import Protocol
 
-from lumen.models.encoder_base import EncoderProtocol
 from lumen.models.registry import list_encoders, list_heads
 
 logger = logging.getLogger(__name__)
@@ -141,7 +140,7 @@ class CheckpointManager:
         """Load index JSON file."""
         if path.exists():
             with open(path) as f:
-                return json.load(f)
+                return json.load(f)  # type: ignore[no-any-return]
         return {"checkpoints": [], "experiments": [], "models": []}
 
     def _save_index(self, path: Path, data: dict[str, Any]) -> None:
@@ -427,7 +426,7 @@ class CheckpointManager:
         Returns:
             Dictionary mapping model names to configuration info.
         """
-        registry = {
+        registry: dict[str, dict[str, dict[str, str]]] = {
             "encoders": {},
             "heads": {},
         }

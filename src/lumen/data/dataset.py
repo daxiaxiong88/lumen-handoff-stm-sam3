@@ -150,9 +150,10 @@ def _load_pil(path: Path) -> tuple[np.ndarray, dict[str, Any]]:
     from PIL import Image
 
     with Image.open(path) as im:
-        if im.mode not in ("L", "I", "I;16", "RGB", "RGBA"):
-            im = im.convert("L")
-        arr = np.asarray(im)
+        img: Any = im
+        if img.mode not in ("L", "I", "I;16", "RGB", "RGBA"):
+            img = img.convert("L")
+        arr = np.asarray(img)
     return arr, {"loader": "pillow", "mode": str(arr.dtype)}
 
 

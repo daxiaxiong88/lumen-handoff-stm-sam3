@@ -8,8 +8,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as nn_functional
 
-from lumen.utils.logging import load_checkpoint, save_checkpoint
-
 
 class ReplayBuffer:
     """Stores exemplars from previous tasks for rehearsal.
@@ -47,7 +45,7 @@ class ReplayBuffer:
             data = data[indices]
             labels = labels[indices]
         self.exemplars[task_id] = [d.to(self.device) for d in data]
-        self.labels[task_id] = [l.to(self.device) for l in labels]
+        self.labels[task_id] = [lbl.to(self.device) for lbl in labels]
 
     def sample(self, task_id: int | None = None, n: int | None = None) -> tuple[torch.Tensor, torch.Tensor] | None:
         """Sample exemplars from the buffer.
@@ -233,7 +231,7 @@ class LwFRegularizer:
         model_kwargs: dict[str, Any],
         alpha: float = 1.0,
         temperature: float = 2.0,
-    ) -> "LwFRegularizer":
+    ) -> LwFRegularizer:
         """Load an old model snapshot and create an LwF regularizer.
 
         Args:
@@ -290,7 +288,7 @@ class IncrementalTrainer(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass through base trainer."""
-        return self.base_trainer.forward(x)
+        return self.base_trainer.forward(x)  # type: ignore[no-any-return]
 
     def compute_loss(
         self,
@@ -306,7 +304,7 @@ class IncrementalTrainer(nn.Module):
         Returns:
             Total loss scalar.
         """
-        loss = self.base_trainer.compute_loss(logits, targets)
+        loss: torch.Tensor = self.base_trainer.compute_loss(logits, targets)  # type: ignore[operator,assignment]
 
         if self.ewc is not None:
             loss = loss + self.ewc.penalty(self.base_trainer)
@@ -332,7 +330,7 @@ class IncrementalTrainer(nn.Module):
                     )
                 loss = loss + self.replay_weight * r_loss
 
-        return loss
+        return loss  # type: ignore[no-any-return]
 
     def train_step(self, batch: dict[str, Any]) -> dict[str, float]:
         """Single training step with incremental regularization.
@@ -344,12 +342,17 @@ class IncrementalTrainer(nn.Module):
             Dictionary with ``"loss"`` key.
         """
         x = batch["image"]
-        targets = batch.get("mask") if "mask" in batch else batch.get("targets") if "targets" in batch else batch.get("keypoints")
+        targets: Any = (
+            batch.get("mask") if "mask" in batch
+            else batch.get("targets") if "targets" in batch
+            else batch.get("keypoints")
+        )
 
-        self.base_trainer.optimizer.zero_grad()
+        optimizer: torch.optim.Optimizer = self.base_trainer.optimizer  # type: ignore[assignment]
+        optimizer.zero_grad()
 
-        mixed = getattr(self.base_trainer, "mixed_precision", False)
-        scaler = getattr(self.base_trainer, "scaler", None)
+        mixed: bool = getattr(self.base_trainer, "mixed_precision", False)
+        scaler: torch.amp.GradScaler | None = getattr(self.base_trainer, "scaler", None)  # type: ignore[assignment]
 
         if mixed and scaler is not None:
             with torch.autocast(device_type=x.device.type):
@@ -357,8 +360,8 @@ class IncrementalTrainer(nn.Module):
                 loss = self.compute_loss(logits, targets)
                 if self.lwf is not None:
                     loss = loss + self.lwf.distillation_loss(logits, x)
-            scaler.scale(loss).backward()
-            scaler.step(self.base_trainer.optimizer)
+            scaler.scale(loss).backward()  # type: ignore[no-any-return]
+            scaler.step(optimizer)
             scaler.update()
         else:
             logits = self.forward(x)
@@ -366,8 +369,7 @@ class IncrementalTrainer(nn.Module):
             if self.lwf is not None:
                 loss = loss + self.lwf.distillation_loss(logits, x)
             loss.backward()
-            self.base_trainer.optimizer.step()
-
+            optimizer.step()
 
         return {"loss": loss.item()}
 

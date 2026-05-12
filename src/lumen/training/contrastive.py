@@ -45,7 +45,7 @@ class ProjectionHead(nn.Module):
         Returns:
             Projected features of shape ``(B, output_dim)``.
         """
-        return self.net(x)
+        return self.net(x)  # type: ignore[no-any-return]
 
 
 class ScientificAugmentations(nn.Module):
@@ -212,17 +212,17 @@ class ContrastiveTrainer(nn.Module):
             self.cls_token = nn.Parameter(torch.zeros(1, 1, encoder.embed_dim))
             nn.init.trunc_normal_(self.cls_token, std=0.02)
         else:
-            self.cls_token = None
+            self.cls_token = None  # type: ignore[assignment]
 
         if projection_head is None:
             self.projection_head = ProjectionHead(encoder.embed_dim)
         else:
-            self.projection_head = projection_head
+            self.projection_head = projection_head  # type: ignore[assignment]
 
         if augmentations is None:
             self.augmentations = ScientificAugmentations()
         else:
-            self.augmentations = augmentations
+            self.augmentations = augmentations  # type: ignore[assignment]
         self.optimizer = optimizer
         if self.optimizer is None and lr is not None:
             self.optimizer = build_optimizer(

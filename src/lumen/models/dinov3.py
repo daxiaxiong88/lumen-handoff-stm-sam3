@@ -95,7 +95,7 @@ class DINOv3Encoder(EncoderBase):
         x = self.preprocess(x)
         outputs = self.model(pixel_values=x)
         first_patch = 1 + self.num_register_tokens
-        return outputs.last_hidden_state[:, first_patch:, :]
+        return outputs.last_hidden_state[:, first_patch:, :]  # type: ignore[no-any-return]
 
     def token_grid(self, image_size: tuple[int, int]) -> tuple[int, int]:
         """Infer DINOv3's cropped patch-token grid for ``image_size``."""

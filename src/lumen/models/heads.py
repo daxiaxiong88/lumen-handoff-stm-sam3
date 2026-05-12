@@ -35,7 +35,7 @@ class ResizeConvBlock(nn.Module):
         )
         x = self.conv(x)
         x = self.norm(x)
-        return self.act(x)
+        return self.act(x)  # type: ignore[no-any-return]
 
 
 class SegmentationHead(nn.Module):
@@ -166,7 +166,7 @@ class PyramidPoolingModule(nn.Module):
             )
             for stage in self.stages
         ]
-        return self.bottleneck(torch.cat([x, *priors], dim=1))
+        return self.bottleneck(torch.cat([x, *priors], dim=1))  # type: ignore[no-any-return]
 
 
 class UPerNetSegmentationHead(nn.Module):
@@ -288,7 +288,7 @@ class UPerNetSegmentationHead(nn.Module):
                 mode="bilinear",
                 align_corners=False,
             )
-        return logits
+        return logits  # type: ignore[no-any-return]
 
 
 class ClassificationHead(nn.Module):
@@ -318,7 +318,7 @@ class ClassificationHead(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Return class logits from patch tokens shaped ``(B, N, D)``."""
-        return self.head(x.mean(dim=1))
+        return self.head(x.mean(dim=1))  # type: ignore[no-any-return]
 
 
 class DetectionHead(nn.Module):
@@ -408,7 +408,7 @@ class KeypointHead(nn.Module):
         # Global average pooling over tokens
         x = x.mean(dim=1)  # (B, embed_dim)
         coords = self.head(x)  # (B, num_keypoints * 2)
-        return coords.view(batch_size, self.num_keypoints, 2)
+        return coords.view(batch_size, self.num_keypoints, 2)  # type: ignore[no-any-return]
 
 
 @register_head("segmentation")

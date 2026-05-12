@@ -13,6 +13,7 @@ from lumen.data.dataset import (
     load_image_array,
     resize_chw,
 )
+
 try:
     from lumen.data.roboflow import (
         ROBOFLOW_AVAILABLE,
@@ -26,14 +27,33 @@ try:
 except ImportError:
     ROBOFLOW_AVAILABLE = False
 
-    class RoboflowDatasetConfig:
+    class RoboflowDatasetConfig:  # type: ignore[no-redef]
         pass
 
-    def build_roboflow_dataset(*args, **kwargs):
+    def build_roboflow_dataset(*args: object, **kwargs: object) -> object:
         raise ImportError("Roboflow package not installed. Install with: pip install roboflow")
 
-    def list_roboflow_projects(*args, **kwargs):
+    def list_roboflow_projects(*args: object, **kwargs: object) -> object:
         raise ImportError("Roboflow package not installed")
+
+try:
+    from lumen.data.hyperdata import (
+        HYPERDATA_AVAILABLE,
+        HyperDataImageDataset,
+        HyperDataSegmentationDataset,
+        WeightManager,
+    )
+except ImportError:
+    HYPERDATA_AVAILABLE = False
+
+    class HyperDataImageDataset:  # type: ignore[no-redef]
+        pass
+
+    class HyperDataSegmentationDataset:  # type: ignore[no-redef]
+        pass
+
+    class WeightManager:  # type: ignore[no-redef]
+        pass
 
 from lumen.data.supervision_bridge import (
     SupervisionBridge,
@@ -48,6 +68,9 @@ __all__ = [
     "COCOSegmentationDataset",
     "Compose",
     "FIBDataset",
+    "HYPERDATA_AVAILABLE",
+    "HyperDataImageDataset",
+    "HyperDataSegmentationDataset",
     "ImageMetadata",
     "SegmentationPairDataset",
     "ScientificImageDataset",
@@ -70,4 +93,5 @@ __all__ = [
     "resize_chw",
     "segmentation_to_detections",
     "upsample_logits_to_image",
+    "WeightManager",
 ]

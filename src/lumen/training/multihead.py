@@ -58,7 +58,7 @@ class HomoscedasticUncertaintyBalancer(nn.Module):
             total = weighted if total is None else total + weighted
         if total is None:
             raise ValueError("No losses were provided")
-        return total
+        return total  # type: ignore[no-any-return]
 
 
 class MultiHeadMicroscopyModel(nn.Module):

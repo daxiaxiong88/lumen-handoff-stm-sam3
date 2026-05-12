@@ -44,7 +44,7 @@ class SegmenterProtocol(Protocol):
         labels: torch.Tensor | np.ndarray | None = None,
         text: str | list[str] | None = None,
         multimask: bool = False,
-    ) -> "sv.Detections": ...
+    ) -> sv.Detections: ...
 
 
 class SegmenterBase(nn.Module):
@@ -68,7 +68,7 @@ class SegmenterBase(nn.Module):
         labels: torch.Tensor | np.ndarray | None = None,
         text: str | list[str] | None = None,
         multimask: bool = False,
-    ) -> "sv.Detections":
+    ) -> sv.Detections:
         del image, boxes, points, labels, text, multimask
         raise NotImplementedError
 

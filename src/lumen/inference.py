@@ -15,12 +15,12 @@ import numpy as np
 import torch
 import torch.nn.functional as nn_functional
 
-from lumen.models.encoder_base import EncoderProtocol
-from lumen.models.heads import ClassificationHead
+from lumen.data.supervision_bridge import (
+    SupervisionBridge,
+)
 from lumen.models.registry import build_encoder, build_head
 from lumen.training.multihead import MultiHeadMicroscopyModel
 from lumen.utils.checkpoint_manager import CheckpointManager, CheckpointMetadata
-from lumen.data.supervision_bridge import SupervisionBridge, prepare_image_for_supervision
 
 logger = logging.getLogger(__name__)
 
@@ -174,7 +174,7 @@ class MicroscopyInference:
     def _get_num_classes(self) -> int:
         """Get number of classes from checkpoint or config."""
         if self._checkpoint_metadata and hasattr(self._checkpoint_metadata, "num_classes"):
-            return self._checkpoint_metadata.num_classes
+            return int(self._checkpoint_metadata.num_classes)  # type: ignore[attr-defined]
         return 2  # Default
 
     def infer(
@@ -217,6 +217,7 @@ class MicroscopyInference:
         if images.shape[1] == 1:
             pass  # Single channel is fine
         elif images.shape[1] == 3:
+            assert self._model is not None
             if self._model.encoder.in_channels == 1:
                 images = images.mean(dim=1, keepdim=True)
         else:
@@ -237,6 +238,7 @@ class MicroscopyInference:
 
         # Run inference
         start_time = time.time()
+        assert self._model is not None
         with torch.inference_mode():
             outputs = self._model.supervised_outputs(images)
         end_time = time.time()
@@ -244,6 +246,7 @@ class MicroscopyInference:
         latency_ms = (end_time - start_time) * 1000
 
         # Post-process based on task type
+        predictions: Any
         if apply_postprocess:
             if self.config.task_type == "classification":
                 predictions = self._postprocess_classification(outputs)
@@ -286,7 +289,7 @@ class MicroscopyInference:
         """Post-process detection outputs."""
         # Detection post-processing would include NMS, confidence filtering, etc.
         # For now, return raw outputs
-        return {k: v.cpu().numpy() for k, v in outputs.items()}
+        return {k: v.cpu().numpy() for k, v in outputs.items()}  # type: ignore[return-value]
 
     def infer_batch(
         self,
@@ -324,15 +327,15 @@ class MicroscopyInference:
             result = self.infer(batch_images, return_raw=True)
 
             # Split results
-            for j, pred in enumerate(result["predictions"]):
+            for j, pred in enumerate(result.predictions):  # type: ignore[arg-type]
                 results.append(
                     InferenceResult(
                         predictions=pred,
-                        latency_ms=result["latency_ms"] / len(batch_paths),
+                        latency_ms=result.latency_ms / len(batch_paths),
                         batch_size=1,
                         metadata={
                             "image_path": str(batch_paths[j]),
-                            **result.get("metadata", {}),
+                            **result.metadata,
                         },
                     )
                 )
@@ -451,7 +454,7 @@ class InferenceServer:
             task_type: Type of task.
         """
         config = InferenceConfig(
-            task_type=task_type,
+            task_type=task_type,  # type: ignore[arg-type]
             device=self.device,
         )
 
@@ -461,7 +464,7 @@ class InferenceServer:
                 checkpoint_id=checkpoint_id,
                 load_best=False,
             )
-            config.checkpoint_path = metadata.path if metadata else None
+            config.checkpoint_path = metadata.checkpoint_path if metadata else None  # type: ignore[attr-defined]
 
         inference = MicroscopyInference(config, self.checkpoint_manager)
         inference.load_model()

@@ -448,9 +448,9 @@ class TestImports:
     def test_training_imports(self) -> None:
         """Enhancement classes are importable from lumen.training."""
         from lumen.training import (
-            UncertaintySampler,
-            PseudoLabeler,
             IncrementalTrainer,
+            PseudoLabeler,
+            UncertaintySampler,
         )
 
         assert UncertaintySampler is not None

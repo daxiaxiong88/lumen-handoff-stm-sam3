@@ -7,8 +7,6 @@ from typing import Any, get_args, get_origin, get_type_hints
 
 import yaml
 
-
-
 # Field aliases for backward compatibility
 FIELD_ALIASES = {
     "in_chans": "in_channels",
@@ -443,7 +441,7 @@ def _dict_to_config(d: dict[str, Any]) -> LumenConfig:
     that YAML files written for slightly newer or older schemas don't
     break the rest of the framework.
     """
-    return _build_dataclass(LumenConfig, d)
+    return _build_dataclass(LumenConfig, d)  # type: ignore[no-any-return]
 
 
 def load_config(path: str) -> LumenConfig:
