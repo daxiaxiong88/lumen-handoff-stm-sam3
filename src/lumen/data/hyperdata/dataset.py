@@ -17,7 +17,6 @@ from torch.utils.data import Dataset
 
 from lumen.data.dataset import (
     _normalize_to_float,
-    _to_chw_tensor,
     ensure_channel_count,
     resize_chw,
 )
@@ -221,7 +220,7 @@ class HyperDataSegmentationDataset(Dataset):
         if self.normalize:
             img_arr = _normalize_to_float(img_arr)
 
-        image = _to_chw_tensor(img_arr, frame_index=None)
+        image = _arr_to_chw(img_arr)
         if self.channels is not None:
             image = ensure_channel_count(image, self.channels)
 
