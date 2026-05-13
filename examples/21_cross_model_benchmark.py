@@ -12,14 +12,12 @@ from pathlib import Path
 from typing import Any
 
 import torch
-import torch.nn.functional as nn_functional
 from torch.utils.data import DataLoader, random_split
-from tqdm import tqdm
 
-from lumen.models import build_encoder, build_head, list_encoders
 from lumen.data import SegmentationPairDataset
+from lumen.models import build_encoder, list_encoders
 from lumen.training.downstream import SegmentationTrainer
-from lumen.utils import MicroscopyBenchmarkResult, compute_efficiency_ratio, relative_improvement
+from lumen.utils import relative_improvement
 
 
 @dataclass
@@ -188,6 +186,7 @@ def benchmark_model(
     print(f"Building encoder: {config.encoder_name}")
     if config.encoder_name == "eupe-pretrained":
         from lumen.models import load_vendor_eupe_encoder
+
         encoder = load_vendor_eupe_encoder(variant="vit_s", device=device)
         encoder.train()
     else:
@@ -197,14 +196,6 @@ def benchmark_model(
         )
 
     num_params = sum(p.numel() for p in encoder.parameters()) / 1e6
-
-    # Build head
-    head = build_head(
-        config.head_name,
-        embed_dim=encoder.embed_dim,
-        num_classes=config.num_classes,
-        patch_size=encoder.patch_size,
-    )
 
     # Create trainer
     trainer = SegmentationTrainer(
@@ -232,11 +223,11 @@ def benchmark_model(
             images = batch["image"].to(device)
             masks = batch["mask"].to(device)
 
+            trainer.optimizer.zero_grad()
             outputs = trainer.model(images)
             loss = trainer.segmentation_criterion(outputs, masks)
             loss.backward()
             trainer.optimizer.step()
-            trainer.optimizer.zero_grad()
 
         if epoch_start:
             torch.cuda.synchronize()
@@ -325,8 +316,6 @@ def print_comparison_table(
     comparisons: dict[str, Any],
 ) -> None:
     """Print comparison table."""
-    baseline = results[0]
-
     print("\n" + "=" * 80)
     print("BENCHMARK COMPARISON")
     print("=" * 80)
@@ -343,7 +332,7 @@ def print_comparison_table(
             f"{result.inference_time:>10.2f}"
         )
 
-    print("\nRelative to baseline ({baseline.config.name}):")
+    print(f"\nRelative to baseline ({results[0].config.name}):")
     print("-" * 80)
 
     for name, metrics in comparisons.items():
@@ -420,7 +409,7 @@ def main() -> None:
     # Benchmark each model
     results: list[ModelBenchmarkResult] = []
 
-    for i, encoder_name in enumerate(args.encoders, 1):
+    for encoder_name in args.encoders:
         config = ModelBenchmarkConfig(
             name=f"{encoder_name}_{args.head}",
             encoder_name=encoder_name,
