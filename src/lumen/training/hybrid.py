@@ -122,6 +122,9 @@ class HybridTrainer(nn.Module):
             Dictionary with ``loss``, ``mae_loss``, and
             ``contrastive_loss`` keys.
         """
+        missing = {"image"} - set(batch)
+        if missing:
+            raise ValueError(f"Batch missing required keys: {sorted(missing)}")
         x = batch["image"]
         out = self.forward(x)
         if self.optimizer is not None:

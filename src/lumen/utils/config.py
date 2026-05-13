@@ -410,15 +410,16 @@ def _build_dataclass(cls: type, raw: Any) -> Any:
     type_map = _dataclass_field_types(cls)
     kwargs: dict[str, Any] = {}
     for key, value in raw.items():
-        if key not in type_map:
+        field_name = key if key in type_map else _resolve_field_alias(key)
+        if field_name not in type_map:
             continue
-        field_type = type_map[key]
+        field_type = type_map[field_name]
         if (
             isinstance(field_type, type)
             and is_dataclass(field_type)
             and isinstance(value, dict)
         ):
-            kwargs[key] = _build_dataclass(field_type, value)
+            kwargs[field_name] = _build_dataclass(field_type, value)
         elif get_origin(field_type) is list:
             item_type = get_args(field_type)[0]
             if (
@@ -426,11 +427,13 @@ def _build_dataclass(cls: type, raw: Any) -> Any:
                 and is_dataclass(item_type)
                 and isinstance(value, list)
             ):
-                kwargs[key] = [_build_dataclass(item_type, item) for item in value]
+                kwargs[field_name] = [
+                    _build_dataclass(item_type, item) for item in value
+                ]
             else:
-                kwargs[key] = value
+                kwargs[field_name] = value
         else:
-            kwargs[key] = value
+            kwargs[field_name] = value
     return cls(**kwargs)
 
 

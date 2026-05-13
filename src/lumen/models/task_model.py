@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Literal
 
 import torch
@@ -14,6 +15,8 @@ Trainability = Literal[
     "encoder_and_head",
     "full",
 ]
+
+logger = logging.getLogger(__name__)
 
 
 def set_module_trainable(module: nn.Module | EncoderProtocol, trainable: bool) -> None:
@@ -32,6 +35,10 @@ def split_encoder_head_parameters(
     weight_decay: float = 1e-4,
 ) -> list[dict[str, object]]:
     """Build optimizer groups for staged head training and fine-tuning."""
+    if trainability == "full":
+        logger.warning(
+            "'full' trainability is deprecated; using 'encoder_and_head' instead"
+        )
     normalized = "encoder_and_head" if trainability == "full" else trainability
     if normalized not in {"frozen_encoder", "head_only", "encoder_and_head"}:
         raise ValueError(f"Unknown trainability policy: {trainability!r}")
