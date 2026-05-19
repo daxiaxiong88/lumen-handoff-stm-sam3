@@ -5,6 +5,7 @@ from pathlib import Path
 import torch
 import torch.nn.functional as nn_functional
 
+from lumen.models._token_utils import tokens_to_feature_map
 from lumen.models.encoder_base import EncoderBase
 from lumen.models.registry import register_encoder
 
@@ -96,6 +97,51 @@ class DINOv3Encoder(EncoderBase):
         outputs = self.model(pixel_values=x)
         first_patch = 1 + self.num_register_tokens
         return outputs.last_hidden_state[:, first_patch:, :]  # type: ignore[no-any-return]
+
+    def get_intermediate_patch_tokens(
+        self,
+        x: torch.Tensor,
+        layer_indices: tuple[int, ...] = (4, 11, 17, 23),
+        norm: bool = True,
+        return_feature_maps: bool = False,
+    ) -> list[torch.Tensor]:
+        """Extract intermediate-layer patch tokens, matching the official API.
+
+        Args:
+            x: Input images shaped ``(B, C, H, W)``.
+            layer_indices: Zero-based transformer block indices to extract.
+            norm: If ``True``, apply the backbone final LayerNorm to each
+                intermediate output, matching the official
+                ``get_intermediate_layers(..., norm=True)`` behavior.
+            return_feature_maps: If ``True``, reshape outputs to 4-D feature
+                maps ``(B, D, H', W')`` using the cropped image size.
+
+        Returns:
+            One tensor per requested layer.
+        """
+        prepared = self.preprocess(x)
+        outputs = self.model(pixel_values=prepared, output_hidden_states=True)
+        hidden_states = outputs.hidden_states
+        if hidden_states is None:
+            raise RuntimeError("DINOv3 model did not return hidden states")
+
+        first_patch = 1 + self.num_register_tokens
+        final_norm = self.model.norm if norm else None
+        image_size = (prepared.shape[-2], prepared.shape[-1])
+
+        results: list[torch.Tensor] = []
+        for idx in layer_indices:
+            tokens = hidden_states[idx + 1][:, first_patch:, :]
+            if final_norm is not None:
+                tokens = final_norm(tokens)
+            if return_feature_maps:
+                tokens = tokens_to_feature_map(
+                    tokens,
+                    image_size=image_size,
+                    patch_size=self.patch_size,
+                )
+            results.append(tokens)
+        return results
 
     def token_grid(self, image_size: tuple[int, int]) -> tuple[int, int]:
         """Infer DINOv3's cropped patch-token grid for ``image_size``."""

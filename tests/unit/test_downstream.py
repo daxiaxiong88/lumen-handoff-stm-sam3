@@ -5,6 +5,7 @@ import tempfile
 
 import pytest
 import torch
+import torch.nn as nn
 import yaml
 
 from lumen.models import EUPEEncoder
@@ -168,6 +169,52 @@ class TestSegmentationTrainer:
         metrics = trainer.train_step(batch)
 
         assert metrics["loss"] >= 0.0
+
+    def test_dinov3_linear_head_uses_multiscale_encoder_method(self) -> None:
+        class _MultiscaleEncoder(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.embed_dim = 32
+                self.patch_size = 16
+                self.in_channels = 1
+                self.dummy = nn.Parameter(torch.zeros(1))
+                self.called = False
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                raise AssertionError("forward() should not be used for multiscale heads")
+
+            def get_intermediate_patch_tokens(
+                self, x: torch.Tensor
+            ) -> list[torch.Tensor]:
+                self.called = True
+                batch = x.shape[0]
+                num_tokens = (x.shape[-2] // self.patch_size) * (
+                    x.shape[-1] // self.patch_size
+                )
+                return [torch.randn(batch, num_tokens, self.embed_dim) for _ in range(4)]
+
+        encoder = _MultiscaleEncoder()
+        trainer = SegmentationTrainer(
+            encoder,
+            num_classes=2,
+            scheduler_name="none",
+            segmentation_head_name="dinov3-linear",
+        )
+        logits = trainer.forward(torch.randn(1, 1, 64, 64))
+        assert encoder.called is True
+        assert logits.shape == (1, 2, 64, 64)
+
+    def test_dinov3_linear_head_requires_multiscale_encoder_method(
+        self, tiny_encoder: EUPEEncoder
+    ) -> None:
+        trainer = SegmentationTrainer(
+            tiny_encoder,
+            num_classes=2,
+            scheduler_name="none",
+            segmentation_head_name="dinov3-linear",
+        )
+        with pytest.raises(TypeError, match="requires intermediate features"):
+            trainer.forward(torch.randn(1, 1, 64, 64))
 
     def test_soft_dice_rewards_foreground_overlap(self) -> None:
         target = torch.zeros(1, 16, 16, dtype=torch.long)

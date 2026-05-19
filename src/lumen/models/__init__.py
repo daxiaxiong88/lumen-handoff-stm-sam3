@@ -12,6 +12,7 @@ from lumen.models.few_shot import FewShotFeatureMatcher, FewShotPrediction
 from lumen.models.heads import (
     ClassificationHead,
     DetectionHead,
+    DINOv3LinearSegmentationHead,
     KeypointHead,
     SegmentationHead,
     UPerNetSegmentationHead,
@@ -33,6 +34,7 @@ from lumen.models.sam3 import (
     load_sam3_image_encoder,
     load_sam3_segmenter,
 )
+from lumen.models.sam3_tracking import Sam3TrackingHead
 from lumen.models.segmenter_base import SegmenterBase, SegmenterProtocol
 from lumen.models.task_model import (
     LumenTaskModel,
@@ -46,6 +48,7 @@ __all__ = [
     "DINOv3Encoder",
     "ClassificationHead",
     "DetectionHead",
+    "DINOv3LinearSegmentationHead",
     "EUPEConfig",
     "EUPEEncoder",
     "EncoderBase",
@@ -56,6 +59,7 @@ __all__ = [
     "LumenTaskModel",
     "Sam3ImageEncoder",
     "Sam3Segmenter",
+    "Sam3TrackingHead",
     "SegmentationHead",
     "SegmenterBase",
     "SegmenterProtocol",

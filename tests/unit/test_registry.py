@@ -103,7 +103,9 @@ class TestHeadRegistry:
     def test_builtin_heads_are_registered(self) -> None:
         assert {
             "classification",
+            "dinov3-linear",
             "segmentation",
+            "sam3-tracking",
             "upernet",
             "detection",
             "keypoint",
@@ -137,6 +139,18 @@ class TestHeadRegistry:
         tokens = torch.randn(1, 16, 32)
         logits = head(tokens, image_size=(64, 64))
         assert logits.shape == (1, 3, 64, 64)
+
+    def test_build_dinov3_linear_segmentation_head(self) -> None:
+        head = build_head(
+            "dinov3-linear",
+            embed_dim=32,
+            num_classes=2,
+            patch_size=16,
+            num_feature_levels=4,
+        )
+        features = [torch.randn(1, 16, 32) for _ in range(4)]
+        logits = head(features, image_size=(64, 64))
+        assert logits.shape == (1, 2, 64, 64)
 
     def test_build_task_model(self) -> None:
         encoder = build_encoder("eupe", embed_dim=64, depth=2, num_heads=4)

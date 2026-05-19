@@ -81,7 +81,6 @@ class SegmentationTrainer(nn.Module):
         include_background_in_dice: bool = False,
         segmentation_head_name: str = "segmentation",
         segmentation_head_kwargs: dict[str, object] | None = None,
-        max_grad_norm: float | None = 1.0,
     ) -> None:
         super().__init__()
         self.encoder = encoder
@@ -100,7 +99,6 @@ class SegmentationTrainer(nn.Module):
         self.trainability = trainability
         self.encoder_lr = lr if encoder_lr is None else encoder_lr
         self.head_lr = lr if head_lr is None else head_lr
-        self.max_grad_norm = max_grad_norm
         self.criterion = SegmentationCriterion(
             segmentation_loss,
             ce_weight=segmentation_ce_weight,
@@ -160,7 +158,15 @@ class SegmentationTrainer(nn.Module):
         Returns:
             Segmentation logits of shape ``(B, num_classes, H, W)``.
         """
-        feats = self.encoder(x)
+        if getattr(self.head, "needs_multiscale_features", False):
+            if not hasattr(self.encoder, "get_intermediate_patch_tokens"):
+                raise TypeError(
+                    f"{type(self.head).__name__} requires intermediate features, "
+                    f"but {type(self.encoder).__name__} does not provide them."
+                )
+            feats = self.encoder.get_intermediate_patch_tokens(x)  # type: ignore[attr-defined]
+        else:
+            feats = self.encoder(x)
         return self.head(feats, image_size=x.shape[2:])  # type: ignore[no-any-return]
 
     def compute_loss(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
@@ -196,22 +202,15 @@ class SegmentationTrainer(nn.Module):
                 loss = self.compute_loss(logits, targets)
             if scaler is not None:
                 scaler.scale(loss).backward()  # type: ignore[no-any-return]
-                if self.max_grad_norm is not None:
-                    scaler.unscale_(optimizer)
-                    nn.utils.clip_grad_norm_(self.parameters(), self.max_grad_norm)
                 scaler.step(optimizer)
                 scaler.update()
             else:
                 loss.backward()
-                if self.max_grad_norm is not None:
-                    nn.utils.clip_grad_norm_(self.parameters(), self.max_grad_norm)
                 optimizer.step()
         else:
             logits = self.forward(x)
             loss = self.compute_loss(logits, targets)
             loss.backward()
-            if self.max_grad_norm is not None:
-                nn.utils.clip_grad_norm_(self.parameters(), self.max_grad_norm)
             optimizer.step()
 
         return {"loss": loss.item()}
@@ -250,7 +249,6 @@ class DetectionTrainer(nn.Module):
         trainability: Trainability = "encoder_and_head",
         encoder_lr: float | None = None,
         head_lr: float | None = None,
-        max_grad_norm: float | None = 1.0,
     ) -> None:
         super().__init__()
         self.encoder = encoder
@@ -263,7 +261,6 @@ class DetectionTrainer(nn.Module):
         self.trainability = trainability
         self.encoder_lr = lr if encoder_lr is None else encoder_lr
         self.head_lr = lr if head_lr is None else head_lr
-        self.max_grad_norm = max_grad_norm
         self._device = next(encoder.parameters()).device
 
         if pretrained_path is not None:
@@ -418,22 +415,15 @@ class DetectionTrainer(nn.Module):
                 loss = self.compute_loss(class_logits, bbox_preds, obj_logits, targets)
             if scaler is not None:
                 scaler.scale(loss).backward()  # type: ignore[no-any-return]
-                if self.max_grad_norm is not None:
-                    scaler.unscale_(optimizer)
-                    nn.utils.clip_grad_norm_(self.parameters(), self.max_grad_norm)
                 scaler.step(optimizer)
                 scaler.update()
             else:
                 loss.backward()
-                if self.max_grad_norm is not None:
-                    nn.utils.clip_grad_norm_(self.parameters(), self.max_grad_norm)
                 optimizer.step()
         else:
             class_logits, bbox_preds, obj_logits = self.forward(x)
             loss = self.compute_loss(class_logits, bbox_preds, obj_logits, targets)
             loss.backward()
-            if self.max_grad_norm is not None:
-                nn.utils.clip_grad_norm_(self.parameters(), self.max_grad_norm)
             optimizer.step()
 
         return {"loss": loss.item()}
@@ -469,7 +459,6 @@ class KeypointTrainer(nn.Module):
         trainability: Trainability = "encoder_and_head",
         encoder_lr: float | None = None,
         head_lr: float | None = None,
-        max_grad_norm: float | None = 1.0,
     ) -> None:
         super().__init__()
         self.encoder = encoder
@@ -482,7 +471,6 @@ class KeypointTrainer(nn.Module):
         self.trainability = trainability
         self.encoder_lr = lr if encoder_lr is None else encoder_lr
         self.head_lr = lr if head_lr is None else head_lr
-        self.max_grad_norm = max_grad_norm
         self._device = next(encoder.parameters()).device
 
         if pretrained_path is not None:
@@ -569,22 +557,15 @@ class KeypointTrainer(nn.Module):
                 loss = self.compute_loss(preds, targets)
             if scaler is not None:
                 scaler.scale(loss).backward()  # type: ignore[no-any-return]
-                if self.max_grad_norm is not None:
-                    scaler.unscale_(optimizer)
-                    nn.utils.clip_grad_norm_(self.parameters(), self.max_grad_norm)
                 scaler.step(optimizer)
                 scaler.update()
             else:
                 loss.backward()
-                if self.max_grad_norm is not None:
-                    nn.utils.clip_grad_norm_(self.parameters(), self.max_grad_norm)
                 optimizer.step()
         else:
             preds = self.forward(x)
             loss = self.compute_loss(preds, targets)
             loss.backward()
-            if self.max_grad_norm is not None:
-                nn.utils.clip_grad_norm_(self.parameters(), self.max_grad_norm)
             optimizer.step()
 
         return {"loss": loss.item()}
