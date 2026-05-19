@@ -57,11 +57,15 @@ class ValDatasetLoader:
         from hyperdata import HyperData
 
         ds = HyperData(self.path, branch=self.branch)
-        self._images = np.asarray(ds["images"])
-        self._masks = np.asarray(ds["masks"])
 
-        meta_raw = np.asarray(ds["dataset_meta"])
-        self._meta = json.loads(meta_raw.tobytes().decode("utf-8"))
+        img_arr = ds["images"]
+        msk_arr = ds["masks"]
+        n = img_arr.shape[0]
+        self._images = np.stack([np.asarray(img_arr[i]) for i in range(n)])
+        self._masks = np.stack([np.asarray(msk_arr[i]) for i in range(n)])
+
+        meta_raw = ds["dataset_meta"]
+        self._meta = json.loads(np.array(meta_raw[:]).tobytes().decode("utf-8"))
         self._names = self._meta.get("sample_names", [])
 
         if not self._names:
