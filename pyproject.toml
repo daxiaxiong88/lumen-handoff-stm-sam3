@@ -25,6 +25,10 @@ dependencies = [
     "timm>=0.9",
     "supervision>=0.28.0",
     "roboflow>=1.1.0",
+    "minio>=7.2.20",
+    "pylance>=0.20.0",
+    "transformers>=4.57.6",
+    "modelscope>=1.36.3",
 ]
 
 [project.optional-dependencies]
