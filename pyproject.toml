@@ -25,6 +25,7 @@ dependencies = [
     "timm>=0.9",
     "supervision>=0.28.0",
     "roboflow>=1.1.0",
+    "sqlalchemy>=2.0.49",
 ]
 
 [project.optional-dependencies]
