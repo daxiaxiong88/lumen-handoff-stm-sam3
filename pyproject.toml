@@ -107,6 +107,8 @@ addopts = ""
 
 [dependency-groups]
 dev = [
+    "nbconvert>=7.17.1",
+    "nbformat>=5.10.4",
     "types-pyyaml>=6.0.12.20250915",
     "types-tqdm>=4.67.3.20260205",
 ]
