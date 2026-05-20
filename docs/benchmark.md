@@ -134,7 +134,83 @@
 - 默认从 `branch="main"` 加载
 - `from_local_folder()` 会先调用 `hyperdata.datasets.val_dataset.build_val_dataset` 构建临时验证集，再按同一规则加载
 
-## 6. 最小示例
+## 6. 与 HyperData PR #81 对齐的 val_dataset 构建流程
+
+参考变更：[hyper-instrument/hyper-data#81](https://github.com/hyper-instrument/hyper-data/pull/81/changes)。
+
+`hyperdata.datasets.val_dataset` 在该 PR 中新增了标准构建流程，Lumen 的 benchmark loader 即按这个结构消费数据。
+
+### 6.1 文件发现与命名规则
+
+`discover_val_pairs(folder)` 约定文件命名为：
+
+- 原图：`<name>.<ext>`
+- 标签：`<name>_label.<ext>`
+
+支持扩展名（大小写不敏感，内部统一转小写匹配）：
+
+- `.tiff`
+- `.tif`
+- `.png`
+- `.jpg`
+- `.jpeg`
+
+配对逻辑：
+
+- 仅当 `<name>` 同时存在 image 与 label 时才纳入结果
+- 有 image 无 label：跳过并记录 warning
+- 有 label 无 image：跳过并记录 warning
+- 返回结果按名称排序，确保构建稳定可复现
+
+### 6.2 读取与校验规则
+
+读取策略：
+
+- TIFF/TIF：使用 `tifffile.imread`
+- PNG/JPG/JPEG：使用 `PIL.Image.open` + `np.asarray`
+
+构建时逐对校验：
+
+- 若 `image.shape[:2] != label.shape[:2]`，直接抛出 `ValueError`
+- 通过校验后才会加入堆叠列表
+
+### 6.3 数据集写入结构
+
+`build_val_dataset(folder, dataset_path, meta=..., message=...)` 会写入 3 个核心键：
+
+- `images`：`np.stack(images_list, axis=0)`
+- `masks`：`np.stack(masks_list, axis=0)`
+- `dataset_meta`：UTF-8 JSON 的 `uint8` 字节数组
+
+自动生成的 `dataset_meta` 基础字段：
+
+- `num_samples`
+- `image_shape`（不含 batch 维）
+- `image_dtype`
+- `mask_dtype`
+- `sample_names`
+
+如果传入 `meta`，会 `dataset_meta.update(meta)` 合并业务字段（例如 `name/version/domain/class_names`）。
+
+### 6.4 本地构建脚本
+
+PR 同时提供了脚本：`scripts/build_fibsem_val_dataset.py`，用于从成对文件构建 FIB-SEM 验证集。
+
+用法示例：
+
+```bash
+python scripts/build_fibsem_val_dataset.py <source_folder> --output <dataset_path>
+```
+
+脚本内置的示例业务元数据包括：
+
+- `name: fibsem_val_dataset_sample`
+- `version: 1.0`
+- `domain: fibsem`
+- `description: FIB-SEM validation dataset for segmentation benchmark`
+- `class_names: {"0": "background", "1": "target"}`
+
+## 7. 最小示例
 
 ```python
 from lumen.benchmark.dataset import ValDatasetLoader
@@ -158,7 +234,7 @@ runner.add_model(
 results = runner.run()
 ```
 
-## 7. 已知注意点
+## 8. 已知注意点
 
 - segmenter 路径下，runner 会将多目标 mask 叠加到一张类别图，重叠区域后写入的类别会覆盖先写入类别。
 - `num_classes` 默认基于当前数据集 mask 的最大类别值推断，若评估集中未出现某些类别，需手动传入固定类数。
