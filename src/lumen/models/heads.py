@@ -216,7 +216,7 @@ class DINOv3LinearSegmentationHead(nn.Module):
         inputs: torch.Tensor | Sequence[torch.Tensor],
         image_size: tuple[int, int],
     ) -> torch.Tensor:
-        return self._forward_logits(inputs, image_size, dropout=True)
+        return self._forward_logits(inputs, image_size, dropout=self.training)
 
     def predict(
         self,
