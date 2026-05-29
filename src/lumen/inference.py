@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import numpy as np
 import torch
@@ -19,7 +19,7 @@ from lumen.data.supervision_bridge import (
     SupervisionBridge,
 )
 from lumen.models.registry import build_encoder, build_head
-from lumen.training.multihead import MultiHeadMicroscopyModel
+from lumen.models.task_model import LumenTaskModel
 from lumen.utils.checkpoint_manager import CheckpointManager, CheckpointMetadata
 
 logger = logging.getLogger(__name__)
@@ -62,7 +62,7 @@ class InferenceResult:
         metadata: Additional metadata.
     """
 
-    predictions: np.ndarray | torch.Tensor
+    predictions: Any
     confidence: np.ndarray | torch.Tensor | None = None
     latency_ms: float = 0.0
     batch_size: int = 1
@@ -90,7 +90,7 @@ class MicroscopyInference:
         self.device = torch.device(config.device)
         self.supervision_bridge = SupervisionBridge()
 
-        self._model: MultiHeadMicroscopyModel | None = None
+        self._model: LumenTaskModel | None = None
         self._checkpoint_metadata: CheckpointMetadata | None = None
 
     def load_model(self) -> None:
@@ -120,25 +120,18 @@ class MicroscopyInference:
                     self._checkpoint_metadata = CheckpointMetadata.from_dict(json.load(f))
                     logger.info(f"Loaded checkpoint metadata: {self._checkpoint_metadata}")
 
-            # Build model architecture
-            encoder = build_encoder(
-                self._checkpoint_metadata.encoder_name if self._checkpoint_metadata else "eupe",
+            encoder_name = (
+                self._checkpoint_metadata.encoder_name
+                if self._checkpoint_metadata
+                else self.config.encoder_name
             )
-            head = build_head(
-                self._checkpoint_metadata.head_name if self._checkpoint_metadata else "segmentation",
-                embed_dim=encoder.embed_dim,
-                num_classes=self._get_num_classes(),
-                patch_size=encoder.patch_size,
+            head_name = (
+                self._checkpoint_metadata.head_name
+                if self._checkpoint_metadata
+                else self.config.head_name
             )
-
-            # Build multi-head model
-            self._model = MultiHeadMicroscopyModel(
-                encoder,
-                classification_head=None,
-                segmentation_head=head,
-                contrastive_head=None,
-                mae_decoder=None,
-            )
+            encoder = build_encoder(encoder_name)
+            self._model = self._build_task_model(encoder, head_name)
 
             # Load weights
             if "model_state_dict" in checkpoint_data:
@@ -149,27 +142,28 @@ class MicroscopyInference:
 
             logger.info("Model loaded successfully")
 
-    def _create_new_model(self) -> MultiHeadMicroscopyModel:
+    def _create_new_model(self) -> LumenTaskModel:
         """Create a new model without loading checkpoint."""
         encoder = build_encoder(self.config.encoder_name)
-        head = build_head(
-            self.config.head_name,
-            embed_dim=encoder.embed_dim,
-            num_classes=self._get_num_classes(),
-            patch_size=encoder.patch_size,
-        )
-
-        model = MultiHeadMicroscopyModel(
-            encoder,
-            classification_head=None,
-            segmentation_head=head,
-            contrastive_head=None,
-            mae_decoder=None,
-        )
-
+        model = self._build_task_model(encoder, self.config.head_name)
         model.eval()
         model.to(self.device)
         return model
+
+    def _build_task_model(self, encoder: Any, head_name: str) -> LumenTaskModel:
+        kwargs: dict[str, object] = {
+            "embed_dim": encoder.embed_dim,
+        }
+        if self.config.task_type == "segmentation":
+            kwargs.update(num_classes=self._get_num_classes(), patch_size=encoder.patch_size)
+        elif self.config.task_type == "classification":
+            kwargs.update(num_classes=self._get_num_classes())
+        elif self.config.task_type == "detection":
+            kwargs.update(num_classes=self._get_num_classes(), patch_size=encoder.patch_size)
+        else:
+            raise ValueError(f"Unsupported task_type: {self.config.task_type!r}")
+        head = build_head(head_name, **kwargs)
+        return LumenTaskModel(encoder, head, task=self.config.task_type)
 
     def _get_num_classes(self) -> int:
         """Get number of classes from checkpoint or config."""
@@ -240,7 +234,8 @@ class MicroscopyInference:
         start_time = time.time()
         assert self._model is not None
         with torch.inference_mode():
-            outputs = self._model.supervised_outputs(images)
+            raw_outputs = self._model(images)
+        outputs = self._normalize_outputs(raw_outputs)
         end_time = time.time()
 
         latency_ms = (end_time - start_time) * 1000
@@ -270,6 +265,19 @@ class MicroscopyInference:
             },
         )
 
+    def _normalize_outputs(self, outputs: object) -> dict[str, torch.Tensor]:
+        if self.config.task_type == "detection":
+            detection_outputs = cast(tuple[torch.Tensor, torch.Tensor, torch.Tensor], outputs)
+            class_logits, bbox_preds, objectness_logits = detection_outputs
+            return {
+                "class_logits": class_logits,
+                "bbox_preds": bbox_preds,
+                "objectness_logits": objectness_logits,
+            }
+        if not torch.is_tensor(outputs):
+            raise TypeError(f"Expected tensor output for {self.config.task_type}")
+        return {self.config.task_type: outputs}
+
     def _postprocess_classification(self, outputs: dict[str, torch.Tensor]) -> np.ndarray:
         """Post-process classification outputs."""
         logits = outputs["classification"]
@@ -285,11 +293,9 @@ class MicroscopyInference:
         preds = logits.argmax(dim=1)
         return preds.cpu().numpy()
 
-    def _postprocess_detection(self, outputs: dict[str, torch.Tensor]) -> np.ndarray:
-        """Post-process detection outputs."""
-        # Detection post-processing would include NMS, confidence filtering, etc.
-        # For now, return raw outputs
-        return {k: v.cpu().numpy() for k, v in outputs.items()}  # type: ignore[return-value]
+    def _postprocess_detection(self, outputs: dict[str, torch.Tensor]) -> dict[str, np.ndarray]:
+        """Return raw experimental detection outputs."""
+        return {key: value.cpu().numpy() for key, value in outputs.items()}
 
     def infer_batch(
         self,
@@ -310,7 +316,7 @@ class MicroscopyInference:
         batch_size = batch_size or self.config.batch_size
         results = []
 
-        from tqdm import tqdm
+        from tqdm import tqdm  # type: ignore[import-untyped]
 
         # Process in batches
         for i in tqdm(
@@ -406,8 +412,8 @@ class MicroscopyInference:
 
         return {
             "status": "loaded",
-            "encoder": self._checkpoint_metadata.encoder_name if self._checkpoint_metadata else "unknown",
-            "head": self._checkpoint_metadata.head_name if self._checkpoint_metadata else "unknown",
+            "encoder": self._checkpoint_metadata.encoder_name if self._checkpoint_metadata else self.config.encoder_name,
+            "head": self._checkpoint_metadata.head_name if self._checkpoint_metadata else self.config.head_name,
             "task_type": self.config.task_type,
             "device": str(self.device),
             "image_size": self.config.image_size,

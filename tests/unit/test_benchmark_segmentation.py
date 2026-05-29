@@ -5,10 +5,9 @@ from __future__ import annotations
 import torch
 
 from lumen.benchmark.metrics import SampleResult, compute_metrics, summarize_results
-from lumen.benchmark.runner import BenchmarkRunner, ModelSpec
+from lumen.benchmark.runner import ModelSpec
 from lumen.models.encoder_base import EncoderBase
 from lumen.models.heads import SegmentationHead
-
 
 # ---------------------------------------------------------------------------
 # Metrics

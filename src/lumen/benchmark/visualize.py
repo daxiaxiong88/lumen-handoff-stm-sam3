@@ -6,7 +6,7 @@ summary tables, designed for Jupyter notebook display.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import torch
@@ -153,10 +153,10 @@ def _to_display(tensor: torch.Tensor) -> np.ndarray:
     arr = tensor.detach().cpu().numpy()
     if arr.ndim == 3:
         if arr.shape[0] == 1:
-            return arr[0]
+            return cast(np.ndarray, arr[0])
         if arr.shape[0] == 3:
-            return np.moveaxis(arr, 0, -1)
-    return arr
+            return cast(np.ndarray, np.moveaxis(arr, 0, -1))
+    return cast(np.ndarray, np.asarray(arr))
 
 
 __all__ = ["plot_predictions", "plot_summary_table"]

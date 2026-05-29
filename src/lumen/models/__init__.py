@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from lumen.models.dinov3 import DINOv3Encoder, load_dinov3_encoder
+from lumen.models.download import ensure_model_asset
 from lumen.models.encoder_base import EncoderBase, EncoderProtocol
 from lumen.models.eupe import (
     EUPEConfig,
@@ -50,6 +51,7 @@ __all__ = [
     "DetectionHead",
     "DINOv3LinearSegmentationHead",
     "EUPEConfig",
+    "ensure_model_asset",
     "EUPEEncoder",
     "EncoderBase",
     "EncoderProtocol",

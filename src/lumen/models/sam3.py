@@ -31,6 +31,7 @@ import numpy as np
 import torch
 import torch.nn.functional as nn_functional
 
+from lumen.models.download import ensure_model_asset
 from lumen.models.encoder_base import EncoderBase
 from lumen.models.registry import register_encoder, register_segmenter
 from lumen.models.segmenter_base import SegmenterBase
@@ -58,6 +59,8 @@ def _load_sam3_model(
     device: torch.device | str | None,
     *,
     local_files_only: bool = True,
+    download: bool = False,
+    model_id: str | None = None,
 ) -> tuple[Any, Any]:
     """Load Sam3Model + Sam3Processor lazily.
 
@@ -66,7 +69,7 @@ def _load_sam3_model(
     only wants the registry entry.
     """
     try:
-        from transformers import Sam3Model, Sam3Processor
+        from transformers import Sam3Model, Sam3Processor  # type: ignore[attr-defined]
     except ImportError as exc:  # pragma: no cover
         raise ImportError(
             "SAM3 support requires `transformers>=5.7`. Install with "
@@ -74,7 +77,17 @@ def _load_sam3_model(
         ) from exc
 
     target = torch.device("cpu" if device is None else device)
-    src = Path(model_dir) if model_dir is not None else _default_model_dir()
+    requested_dir = Path(model_dir) if model_dir is not None else _default_model_dir()
+    src = (
+        requested_dir
+        if requested_dir.exists()
+        else ensure_model_asset(
+            "sam3",
+            model_id=model_id,
+            local_dir=requested_dir,
+            download=download,
+        )
+    )
     model = Sam3Model.from_pretrained(src, local_files_only=local_files_only).to(target)  # type: ignore[arg-type]
     processor = Sam3Processor.from_pretrained(src, local_files_only=local_files_only)
     return model, processor
@@ -156,6 +169,8 @@ def load_sam3_image_encoder(
     *,
     device: torch.device | str | None = None,
     local_files_only: bool = True,
+    download: bool = False,
+    model_id: str | None = None,
 ) -> Sam3ImageEncoder:
     """Load the local SAM3 vision encoder.
 
@@ -170,7 +185,11 @@ def load_sam3_image_encoder(
         A :class:`Sam3ImageEncoder` in eval mode.
     """
     model, _ = _load_sam3_model(
-        model_dir, device, local_files_only=local_files_only
+        model_dir,
+        device,
+        local_files_only=local_files_only,
+        download=download,
+        model_id=model_id,
     )
     encoder = Sam3ImageEncoder(model)
     encoder.eval()
@@ -358,6 +377,8 @@ def load_sam3_segmenter(
     *,
     device: torch.device | str | None = None,
     local_files_only: bool = True,
+    download: bool = False,
+    model_id: str | None = None,
 ) -> Sam3Segmenter:
     """Load the local SAM3 promptable segmenter.
 
@@ -372,7 +393,11 @@ def load_sam3_segmenter(
         A :class:`Sam3Segmenter` in eval mode.
     """
     model, processor = _load_sam3_model(
-        model_dir, device, local_files_only=local_files_only
+        model_dir,
+        device,
+        local_files_only=local_files_only,
+        download=download,
+        model_id=model_id,
     )
     model.eval()
     return Sam3Segmenter(model, processor)

@@ -6,6 +6,7 @@ import torch
 import torch.nn.functional as nn_functional
 
 from lumen.models._token_utils import tokens_to_feature_map
+from lumen.models.download import ensure_model_asset
 from lumen.models.encoder_base import EncoderBase
 from lumen.models.registry import register_encoder
 
@@ -21,6 +22,8 @@ class DINOv3Encoder(EncoderBase):
         local_files_only: bool = True,
         normalize: bool = True,
         auto_convert_input_channels: bool = True,
+        download: bool = False,
+        model_id: str | None = None,
     ) -> None:
         super().__init__()
         try:
@@ -32,7 +35,16 @@ class DINOv3Encoder(EncoderBase):
             ) from exc
 
         target_device = torch.device("cpu" if device is None else device)
-        self.model_dir = Path(model_dir)
+        requested_dir = Path(model_dir)
+        if requested_dir.exists():
+            self.model_dir = requested_dir
+        else:
+            self.model_dir = ensure_model_asset(
+                "dinov3",
+                model_id=model_id,
+                local_dir=requested_dir,
+                download=download,
+            )
         self.processor = AutoImageProcessor.from_pretrained(
             self.model_dir,
             local_files_only=local_files_only,
@@ -179,9 +191,16 @@ def load_dinov3_encoder(
     model_dir: str | Path = "model/dino/dinov3-vits16-pretrain-lvd1689m",
     *,
     device: torch.device | str | None = None,
+    download: bool = False,
+    model_id: str | None = None,
 ) -> DINOv3Encoder:
     """Load the local DINOv3 ViT-S/16 ModelScope checkpoint."""
-    return DINOv3Encoder(model_dir=model_dir, device=device)
+    return DINOv3Encoder(
+        model_dir=model_dir,
+        device=device,
+        download=download,
+        model_id=model_id,
+    )
 
 
 __all__ = ["DINOv3Encoder", "load_dinov3_encoder"]

@@ -16,7 +16,7 @@ not intended for ``SegmentationTrainer``.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import torch
@@ -49,14 +49,18 @@ def _raise_helpful_sam3_import_error(exc: ImportError) -> None:
 def _load_video_builder() -> Any:
     """Import the official SAM3 video builder lazily."""
     try:
-        from sam3.model_builder import build_sam3_video_model
+        from sam3.model_builder import (
+            build_sam3_video_model,  # type: ignore[import-untyped]
+        )
 
         return build_sam3_video_model
     except ImportError as first_exc:
         if isinstance(first_exc, ModuleNotFoundError) and first_exc.name != "sam3":
             _raise_helpful_sam3_import_error(first_exc)
         try:
-            from sam3.model_builder import build_sam3_video_predictor
+            from sam3.model_builder import (
+                build_sam3_video_predictor,  # type: ignore[import-untyped]
+            )
 
             return build_sam3_video_predictor
         except ImportError as second_exc:  # pragma: no cover
@@ -141,7 +145,7 @@ class Sam3TrackingHead(nn.Module):
             **kwargs,
         )
         self.state = state
-        return state
+        return cast(dict[str, Any], state)
 
     def add_box_prompt(
         self,
@@ -176,7 +180,7 @@ class Sam3TrackingHead(nn.Module):
             dtype=np.float32,
         )
 
-        return self.predictor.add_new_points_or_box(
+        result = self.predictor.add_new_points_or_box(
             inference_state=self.state,
             frame_idx=frame_idx,
             obj_id=obj_id,
@@ -184,6 +188,7 @@ class Sam3TrackingHead(nn.Module):
             clear_old_points=clear_old_points,
             **kwargs,
         )
+        return cast(tuple[Any, Any, Any, Any], result)
 
     def propagate(
         self,

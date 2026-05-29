@@ -36,3 +36,15 @@ Validation gates:
 - Few-shot improvement over pure supervised fine-tuning: `>= 0.05`
 - Joint pretext compute divided by sequential supervised + SSL compute: `<= 0.70`
 - `checkpoint_path` must point to the produced pretrained weights.
+
+
+Download helper:
+
+```bash
+# Explicit downloads only; constructors do not fetch by default.
+lumen-download-models --family dinov3
+lumen-download-models --family sam3
+LUMEN_MODELSCOPE_EUPE_ID=<verified-modelscope-id> lumen-download-models --family eupe --variant vit_s
+```
+
+Existing legacy EUPE checkpoints in `weights/` are still discovered for compatibility, but new assets should live under `model/eupe/`.

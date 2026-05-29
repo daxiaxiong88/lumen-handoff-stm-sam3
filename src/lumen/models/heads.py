@@ -165,7 +165,8 @@ class DINOv3LinearSegmentationHead(nn.Module):
         self.conv = nn.Conv2d(self.channels, num_classes, kernel_size=1)
         self.needs_multiscale_features = True
         nn.init.normal_(self.conv.weight, mean=0.0, std=0.01)
-        nn.init.constant_(self.conv.bias, 0.0)
+        if self.conv.bias is not None:
+            nn.init.constant_(self.conv.bias, 0.0)
 
     def _transform_inputs(
         self,

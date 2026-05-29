@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import torch
@@ -170,12 +170,14 @@ class BenchmarkRunner:
         image_size = (sample.image.shape[1], sample.image.shape[2])
         logits = head(tokens, image_size=image_size)  # (1, C, H, W)
         pred = logits.argmax(dim=1).squeeze(0).cpu()  # (H, W)
-        return pred
+        return cast(torch.Tensor, pred)
 
     def _predict_segmenter(
         self, spec: ModelSpec, sample: ValSample
     ) -> torch.Tensor:
         segmenter = spec.segmenter
+        if segmenter is None:
+            raise RuntimeError("ModelSpec has no segmenter")
         h, w = sample.mask.shape
 
         img_np = sample.image.permute(1, 2, 0).numpy()

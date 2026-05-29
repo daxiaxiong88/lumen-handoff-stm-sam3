@@ -37,7 +37,7 @@ src/lumen/
 
 ### EUPE
 
-`EUPEEncoder` wraps the local vendor implementation under `vandor/EUPE/`.
+`EUPEEncoder` wraps the local vendor implementation under `vendor/EUPE/`.
 The directory name is intentionally misspelled as `vandor`; do not rename it.
 
 ```python
@@ -336,6 +336,49 @@ uv run mypy src/
 - Large local data and checkpoints under `data/` and `model/` are not intended
   to be committed.
 
+
+## Roboflow Inference And Human Correction
+
+Roboflow hosted inference is explicit and optional. Install the `roboflow` extra
+and provide `ROBOFLOW_API_KEY` or pass `api_key` directly:
+
+```python
+from lumen.data import RoboflowInferenceClient, RoboflowInferenceConfig
+
+client = RoboflowInferenceClient(
+    RoboflowInferenceConfig(
+        workspace="workspace",
+        project="project",
+        version=1,
+        task_type="detection",
+    )
+)
+result = client.infer_path("sample.png")
+detections = result.to_detections({"particle": 1})
+```
+
+Human correction is integrated through Label Studio rather than a custom editor.
+Use `lumen.annotation.write_label_studio_tasks()` to generate task JSON with
+optional model preannotations, import that JSON into Label Studio, correct the
+results, then convert the Label Studio JSON export back into training labels
+with `export_corrected_labels()`.
+
+- classification exports: `labels.csv`
+- detection exports: COCO-style `annotations.json`
+- segmentation exports: image plus `*_label.png` pairs for `SegmentationPairDataset`
+
+```python
+from lumen.annotation import (
+    LabelStudioConfig,
+    export_corrected_labels,
+    write_label_studio_tasks,
+)
+
+config = LabelStudioConfig(task_type="segmentation", class_names=("cell",))
+write_label_studio_tasks(["sample.png"], "tasks.json", config=config)
+export_corrected_labels("label-studio-export.json", "data/corrected", config=config)
+```
+
 ## Public API Snapshot
 
 ```python
@@ -369,3 +412,18 @@ from lumen.data import (
 
 Document version: 2.0
 Last updated: 2026-05-07
+
+
+## Model Weights
+
+Model downloads are explicit. Encoder factories stay offline unless called with `download=True`; the CLI mirrors the same behavior:
+
+```bash
+lumen-download-models --family dinov3
+lumen-download-models --family sam3
+LUMEN_MODELSCOPE_EUPE_ID=<verified-modelscope-id> lumen-download-models --family eupe --variant vit_s
+```
+
+SAM3 and DINOv3 may require gated-model credentials. EUPE ModelScope repo IDs are configurable via `model_id=` or `LUMEN_MODELSCOPE_EUPE_ID`.
+
+Detection and keypoint heads are currently experimental convenience baselines, not production detector/keypoint systems.

@@ -24,13 +24,12 @@ dependencies = [
     "einops>=0.7",
     "timm>=0.9",
     "supervision>=0.28.0",
-    "roboflow>=1.1.0",
     "minio>=7.2.20",
-    "pylance>=0.20.0",
-    "transformers>=4.57.6",
-    "modelscope>=1.36.3",
     "sqlalchemy>=2.0.49",
 ]
+
+[project.scripts]
+lumen-download-models = "lumen.models.download:main"
 
 [project.optional-dependencies]
 dev = [
@@ -42,6 +41,7 @@ dev = [
     "pre-commit>=3.3",
 ]
 roboflow = [
+    "roboflow>=1.1.0",
     "scikit-image>=0.21",
 ]
 hyperdata = [
@@ -66,6 +66,8 @@ target-version = ['py39']
 [tool.ruff]
 line-length = 88
 target-version = "py39"
+
+[tool.ruff.lint]
 select = ["E", "F", "I", "W", "N", "UP", "B", "C4", "SIM"]
 ignore = ["E501"]
 
@@ -79,6 +81,11 @@ exclude = ["\\.venv"]
 [[tool.mypy.overrides]]
 module = [
     "lumen.data.roboflow",
+    "modelscope.*",
+    "roboflow.*",
+    "sam3.*",
+    "tqdm",
+    "tqdm.*",
     "hyperdata.*",
     "hyperspy.*",
     "pycocotools.*",

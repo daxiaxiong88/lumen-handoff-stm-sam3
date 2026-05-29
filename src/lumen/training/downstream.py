@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from typing import Any
 
 import torch
@@ -114,6 +115,10 @@ class SegmentationTrainer(nn.Module):
         self.scheduler = self._build_scheduler(scheduler_name)
         self.scaler = _build_grad_scaler(mixed_precision)
 
+    def _step_scheduler(self) -> None:
+        if self.scheduler is not None:
+            self.scheduler.step()
+
     def _load_pretrained(self, path: str) -> None:
         """Load pretrained EUPE weights."""
         state = torch.load(path, map_location=self._device, weights_only=True)
@@ -213,6 +218,7 @@ class SegmentationTrainer(nn.Module):
             loss.backward()
             optimizer.step()
 
+        self._step_scheduler()
         return {"loss": loss.item()}
 
 
@@ -251,6 +257,12 @@ class DetectionTrainer(nn.Module):
         head_lr: float | None = None,
     ) -> None:
         super().__init__()
+        warnings.warn(
+            "DetectionTrainer/DetectionHead are experimental and use simplified "
+            "top-k matching without NMS or Hungarian assignment.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
         self.encoder = encoder
         self.head = DetectionHead(encoder.embed_dim, num_classes, encoder.patch_size)
         self.num_classes = num_classes
@@ -426,6 +438,8 @@ class DetectionTrainer(nn.Module):
             loss.backward()
             optimizer.step()
 
+        if self.scheduler is not None:
+            self.scheduler.step()
         return {"loss": loss.item()}
 
 
@@ -461,6 +475,12 @@ class KeypointTrainer(nn.Module):
         head_lr: float | None = None,
     ) -> None:
         super().__init__()
+        warnings.warn(
+            "KeypointTrainer/KeypointHead are experimental and regress coordinates "
+            "from globally pooled patch tokens.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
         self.encoder = encoder
         self.head = KeypointHead(encoder.embed_dim, num_keypoints)
         self.num_keypoints = num_keypoints
@@ -568,4 +588,6 @@ class KeypointTrainer(nn.Module):
             loss.backward()
             optimizer.step()
 
+        if self.scheduler is not None:
+            self.scheduler.step()
         return {"loss": loss.item()}
