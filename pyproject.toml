@@ -39,6 +39,7 @@ dev = [
     "ruff>=0.0.285",
     "mypy>=1.5",
     "pre-commit>=3.3",
+    "requests-mock>=1.11",
 ]
 roboflow = [
     "roboflow>=1.1.0",
@@ -50,6 +51,9 @@ hyperdata = [
 transformers = [
     "transformers>=4.30",
     "modelscope>=1.4",
+]
+labelstudio = [
+    "label-studio-sdk>=1.0",
 ]
 
 [build-system]
@@ -100,6 +104,7 @@ module = [
     "tensorboard.*",
     "matplotlib.*",
     "transformers.*",
+    "label_studio_sdk.*",
 ]
 ignore_missing_imports = true
 
