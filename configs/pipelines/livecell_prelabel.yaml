@@ -1,0 +1,6 @@
+pipeline:
+  source: {type: hyperdata, dataset: livecell, split: unlabeled}
+  model: {encoder: eupe-pretrained, head: upernet, ckpt: weights/livecell/best.pt}
+  filter: {confidence_gate: 0.7, ood: {method: mahalanobis, threshold: 0.9}}
+  sample: {active: {method: entropy, k: 200}}
+  sink: {type: label_studio, project: "LiveCELL pre-label v3"}

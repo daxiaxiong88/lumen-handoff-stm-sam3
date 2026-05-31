@@ -41,13 +41,16 @@ class InferenceConfig:
     """
 
     checkpoint_path: str | Path | None = None
-    encoder_name: str = "eupe-pretrained"
+    encoder_name: str = "simple"
     head_name: str = "upernet"
     task_type: Literal["classification", "segmentation", "detection"] = "segmentation"
     device: str | torch.device = "cuda" if torch.cuda.is_available() else "cpu"
     batch_size: int = 1
     image_size: tuple[int, int] = (224, 224)
     confidence_threshold: float = 0.5
+    encoder_kwargs: dict[str, object] = field(default_factory=dict)
+    head_kwargs: dict[str, object] = field(default_factory=dict)
+    num_classes: int = 2
 
 
 @dataclass
@@ -130,7 +133,7 @@ class MicroscopyInference:
                 if self._checkpoint_metadata
                 else self.config.head_name
             )
-            encoder = build_encoder(encoder_name)
+            encoder = build_encoder(encoder_name, **self.config.encoder_kwargs)
             self._model = self._build_task_model(encoder, head_name)
 
             # Load weights
@@ -144,7 +147,7 @@ class MicroscopyInference:
 
     def _create_new_model(self) -> LumenTaskModel:
         """Create a new model without loading checkpoint."""
-        encoder = build_encoder(self.config.encoder_name)
+        encoder = build_encoder(self.config.encoder_name, **self.config.encoder_kwargs)
         model = self._build_task_model(encoder, self.config.head_name)
         model.eval()
         model.to(self.device)
@@ -162,6 +165,7 @@ class MicroscopyInference:
             kwargs.update(num_classes=self._get_num_classes(), patch_size=encoder.patch_size)
         else:
             raise ValueError(f"Unsupported task_type: {self.config.task_type!r}")
+        kwargs.update(self.config.head_kwargs)
         head = build_head(head_name, **kwargs)
         return LumenTaskModel(encoder, head, task=self.config.task_type)
 
@@ -169,7 +173,7 @@ class MicroscopyInference:
         """Get number of classes from checkpoint or config."""
         if self._checkpoint_metadata and hasattr(self._checkpoint_metadata, "num_classes"):
             return int(self._checkpoint_metadata.num_classes)  # type: ignore[attr-defined]
-        return 2  # Default
+        return self.config.num_classes
 
     def infer(
         self,
@@ -194,12 +198,11 @@ class MicroscopyInference:
 
         # Prepare input
         if isinstance(images, np.ndarray):
-            images = torch.from_numpy(images).float()
+            images = torch.from_numpy(np.ascontiguousarray(images).copy()).float()
 
         # Handle different input shapes
         if images.dim() == 2:
-            images = images.unsqueeze(0)  # Add batch
-            images = images.unsqueeze(0).unsqueeze(0)  # Add channel
+            images = images.unsqueeze(0).unsqueeze(0)  # Add batch and channel
         elif images.dim() == 3:
             images = images.unsqueeze(0)  # Add batch
         elif images.dim() != 4:
