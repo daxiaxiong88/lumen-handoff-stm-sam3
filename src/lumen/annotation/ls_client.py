@@ -10,6 +10,7 @@ from typing import Any
 
 import numpy as np
 import requests
+from PIL import Image
 
 from lumen.annotation.label_studio import (
     LabelStudioConfig,
@@ -18,6 +19,9 @@ from lumen.annotation.label_studio import (
     prediction_to_label_studio_result,
 )
 from lumen.data.dataset import load_image_array
+from lumen.data.supervision_bridge import prepare_image_for_supervision
+
+_NON_DISPLAY_EXTENSIONS = frozenset({".tiff", ".tif", ".dm3", ".dm4"})
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +105,15 @@ class LabelStudioClient:
             image_path = Path(raw_path).resolve()
             arr, _ = load_image_array(image_path)
             height, width = _image_size(arr)
-            image_url = str(image_path)
+
+            needs_preview = image_path.suffix.lower() in _NON_DISPLAY_EXTENSIONS
+            if needs_preview:
+                preview_path = image_path.with_suffix(".preview.png")
+                preview_arr = prepare_image_for_supervision(arr)
+                Image.fromarray(preview_arr).save(preview_path)
+                image_url = str(preview_path)
+            else:
+                image_url = str(image_path)
 
             task_data: dict[str, Any] = {
                 "data": {"image": image_url},
@@ -111,6 +123,8 @@ class LabelStudioClient:
                     "height": height,
                 },
             }
+            if needs_preview:
+                task_data["meta"]["original_path"] = str(image_path)
 
             # Build predictions if provided
             preds = predictions_by_image.get(str(image_path), [])

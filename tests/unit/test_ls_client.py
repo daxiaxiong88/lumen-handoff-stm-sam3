@@ -139,6 +139,34 @@ class TestPushTasks:
             result = client.push_tasks(1, [])
         assert result == []
 
+    def test_push_tiff_generates_preview(
+        self, client: LabelStudioClient, mock_ls, tmp_path: Path,
+    ) -> None:
+        mock_ls.post(f"{LS_URL}/api/projects/1/import", json=[])
+
+        tiff_path = tmp_path / "sample.tiff"
+        arr = np.random.randint(0, 65535, (32, 32), dtype=np.uint16)
+        Image.fromarray(arr).save(tiff_path)
+
+        with mock_ls:
+            result = client.push_tasks(1, [str(tiff_path)])
+        assert len(result) == 1
+        assert result[0]["data"]["image"].endswith(".preview.png")
+        assert "original_path" in result[0]["meta"]
+        preview_path = tiff_path.with_suffix(".preview.png")
+        assert preview_path.exists()
+
+    def test_push_png_no_preview(
+        self, client: LabelStudioClient, mock_ls, tmp_image: Path,
+    ) -> None:
+        mock_ls.post(f"{LS_URL}/api/projects/1/import", json=[])
+
+        with mock_ls:
+            result = client.push_tasks(1, [str(tmp_image)])
+        assert len(result) == 1
+        assert result[0]["data"]["image"].endswith(".png")
+        assert "original_path" not in result[0]["meta"]
+
 
 # ---------------------------------------------------------------------------
 # LabelStudioClient — pull_annotations
