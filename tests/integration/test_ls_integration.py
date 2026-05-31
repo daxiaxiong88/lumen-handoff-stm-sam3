@@ -75,11 +75,11 @@ class TestLiveIntegration:
         client.set_status(task_ids[0], "accepted")
         client.set_status(task_ids[1], "rejected")
 
-        # 6. Pull and verify statuses
+        # 6. Pull and verify Lumen-owned statuses in task metadata
         reviewed = client.pull_annotations(project_id)
         by_id = {r["id"]: r for r in reviewed}
-        assert by_id[task_ids[0]].get("status") in ("accepted", "completed")
-        assert by_id[task_ids[1]]["status"] == "rejected"
+        assert by_id[task_ids[0]].get("meta", {}).get("lumen_status") == "accepted"
+        assert by_id[task_ids[1]].get("meta", {}).get("lumen_status") == "rejected"
 
         # 7. Store round-trip
         for ann in annotations[:3]:

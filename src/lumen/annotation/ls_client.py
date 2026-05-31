@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +39,7 @@ class LabelStudioClient:
         self._api_key = api_key
         self._session = requests.Session()
         self._session.headers.update({"Authorization": f"Token {api_key}"})
+        self._project_configs: dict[int, LabelStudioConfig] = {}
 
     @property
     def base_url(self) -> str:
@@ -71,22 +73,33 @@ class LabelStudioClient:
         )
         label_config = build_label_config(config)
 
-        # Check for existing project with the same title
-        resp = self._session.get(f"{self._url}/api/projects/", params={"title": name})
-        resp.raise_for_status()
-        for proj in resp.json():
-            if proj.get("title") == name:
-                project_id = proj["id"]
-                # Update labelling config if it differs
-                self._maybe_update_config(project_id, label_config)
-                return project_id
+        # Check for existing project with the same title. Label Studio returns
+        # paginated responses on current versions, but older mocks/installations
+        # may still return a bare list.
+        next_url: str | None = f"{self._url}/api/projects/"
+        params: dict[str, Any] | None = {"title": name}
+        while next_url is not None:
+            resp = self._session.get(next_url, params=params)
+            resp.raise_for_status()
+            body = resp.json()
+            for proj in _items_from_response(body):
+                if proj.get("title") == name:
+                    project_id = int(proj["id"])
+                    self._project_configs[project_id] = config
+                    # Update labelling config if it differs
+                    self._maybe_update_config(project_id, label_config)
+                    return project_id
+            next_url = _next_url(body, self._url)
+            params = None
 
         resp = self._session.post(
             f"{self._url}/api/projects/",
             json={"title": name, "label_config": label_config},
         )
         resp.raise_for_status()
-        return resp.json()["id"]
+        project_id = int(resp.json()["id"])
+        self._project_configs[project_id] = config
+        return project_id
 
     # ------------------------------------------------------------------
     # Task management
@@ -107,6 +120,13 @@ class LabelStudioClient:
         preview is generated and the original path is stored in task meta.
         """
         predictions_by_image = predictions_by_image or {}
+        if config is None:
+            config = self._project_configs.get(project_id)
+        if predictions_by_image and config is None:
+            raise ValueError(
+                "config is required when predictions_by_image contains predictions; "
+                "call bootstrap_project() first or pass config=..."
+            )
         tasks: list[dict[str, Any]] = []
 
         for raw_path in image_paths:
@@ -136,7 +156,7 @@ class LabelStudioClient:
 
             # Build predictions if provided
             preds = predictions_by_image.get(str(image_path), [])
-            if preds and config is not None:
+            if preds:
                 results: list[dict[str, Any]] = []
                 for pred in preds:
                     result = prediction_to_label_studio_result(
@@ -186,30 +206,52 @@ class LabelStudioClient:
         Returns:
             List of task dicts from the Label Studio export endpoint.
         """
-        params: dict[str, Any] = {"exportType": "JSON"}
-        if since is not None:
-            params["updated_at__gte"] = since
-
         resp = self._session.get(
             f"{self._url}/api/projects/{project_id}/export",
-            params=params,
+            params={"exportType": "JSON"},
         )
         resp.raise_for_status()
         data = resp.json()
-        return data if isinstance(data, list) else []
+        if not isinstance(data, list):
+            return []
+        if since is None:
+            return data
+
+        cutoff = _parse_iso8601(since)
+        return [
+            task
+            for task in data
+            if (updated_at := _parse_optional_iso8601(task.get("updated_at"))) is not None
+            and updated_at >= cutoff
+        ]
 
     # ------------------------------------------------------------------
     # Status management
     # ------------------------------------------------------------------
 
     def set_status(self, task_id: int, status: str) -> dict[str, Any]:
-        """Set the review status of a task."""
+        """Set the Lumen review status of a Label Studio task.
+
+        Open-source Label Studio does not expose a top-level custom ``status``
+        field on task updates. Store Lumen's state-machine status in task
+        metadata so later sync steps can read it without relying on
+        undocumented API fields.
+        """
+        current_resp = self._session.get(f"{self._url}/api/tasks/{task_id}/")
+        current_resp.raise_for_status()
+        current = current_resp.json()
+        meta = dict(current.get("meta") or {})
+        meta["lumen_status"] = status
         resp = self._session.patch(
             f"{self._url}/api/tasks/{task_id}/",
-            json={"status": status},
+            json={"meta": meta},
         )
         resp.raise_for_status()
-        return resp.json()
+        updated = resp.json()
+        updated_meta = dict(updated.get("meta") or meta)
+        updated_meta["lumen_status"] = status
+        updated["meta"] = updated_meta
+        return updated
 
     def mark_reviewed(self, task_ids: list[int]) -> list[dict[str, Any]]:
         """Mark multiple tasks as reviewed (accepted)."""
@@ -241,6 +283,44 @@ def _image_size(arr: np.ndarray) -> tuple[int, int]:
     if arr.ndim == 3:
         return int(arr.shape[-2]), int(arr.shape[-1])
     raise ValueError(f"Unsupported image rank: {arr.ndim}")
+
+
+def _items_from_response(body: Any) -> list[dict[str, Any]]:
+    if isinstance(body, list):
+        return [item for item in body if isinstance(item, dict)]
+    if isinstance(body, dict) and isinstance(body.get("results"), list):
+        return [item for item in body["results"] if isinstance(item, dict)]
+    return []
+
+
+def _next_url(body: Any, base_url: str) -> str | None:
+    if not isinstance(body, dict):
+        return None
+    next_url = body.get("next")
+    if not isinstance(next_url, str) or not next_url:
+        return None
+    if next_url.startswith(("http://", "https://")):
+        return next_url
+    return f"{base_url}{next_url if next_url.startswith('/') else f'/{next_url}'}"
+
+
+def _parse_iso8601(value: str) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError(f"Invalid ISO-8601 timestamp: {value!r}") from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _parse_optional_iso8601(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return _parse_iso8601(value)
+    except ValueError:
+        return None
 
 
 __all__ = ["LabelStudioClient"]

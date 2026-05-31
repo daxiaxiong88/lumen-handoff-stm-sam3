@@ -14,7 +14,6 @@ from lumen.annotation.label_studio import LabelStudioConfig, build_label_config
 from lumen.annotation.ls_client import LabelStudioClient
 from lumen.annotation.store import LabellingTaskStore
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -84,6 +83,28 @@ class TestBootstrapProject:
             pid = client.bootstrap_project("Existing", "classification", ("cat", "dog"))
         assert pid == 7
 
+    def test_bootstrap_project_idempotent_paginated(
+        self, client: LabelStudioClient, mock_ls
+    ) -> None:
+        config = LabelStudioConfig(task_type="classification", class_names=("cat", "dog"))
+        label_config = build_label_config(config)
+        mock_ls.get(
+            f"{LS_URL}/api/projects/",
+            json={
+                "count": 1,
+                "next": None,
+                "previous": None,
+                "results": [
+                    {"id": 8, "title": "Existing", "label_config": label_config},
+                ],
+            },
+        )
+        mock_ls.get(f"{LS_URL}/api/projects/8/", json={"label_config": label_config})
+
+        with mock_ls:
+            pid = client.bootstrap_project("Existing", "classification", ("cat", "dog"))
+        assert pid == 8
+
 
 # ---------------------------------------------------------------------------
 # LabelStudioClient — push_tasks
@@ -120,6 +141,41 @@ class TestPushTasks:
         assert len(result) == 1
         assert "predictions" in result[0]
         assert result[0]["predictions"][0]["result"]
+
+    def test_push_tasks_with_predictions_uses_bootstrap_config(
+        self, client: LabelStudioClient, mock_ls, tmp_image: Path
+    ) -> None:
+        label_config = build_label_config(
+            LabelStudioConfig(task_type="detection", class_names=("particle",))
+        )
+        mock_ls.get(
+            f"{LS_URL}/api/projects/",
+            json=[{"id": 3, "title": "Existing", "label_config": label_config}],
+        )
+        mock_ls.get(f"{LS_URL}/api/projects/3/", json={"label_config": label_config})
+        mock_ls.post(f"{LS_URL}/api/projects/3/import", json=[])
+        pred = MagicMock(class_name="particle", confidence=0.9, xyxy=(5, 2, 20, 10))
+
+        with mock_ls:
+            project_id = client.bootstrap_project("Existing", "detection", ("particle",))
+            result = client.push_tasks(
+                project_id,
+                [str(tmp_image)],
+                {str(tmp_image.resolve()): [pred]},
+            )
+        assert "predictions" in result[0]
+
+    def test_push_tasks_with_predictions_requires_config(
+        self, client: LabelStudioClient, tmp_image: Path
+    ) -> None:
+        pred = MagicMock(class_name="particle", confidence=0.9, xyxy=(5, 2, 20, 10))
+
+        with pytest.raises(ValueError, match="config is required"):
+            client.push_tasks(
+                1,
+                [str(tmp_image)],
+                {str(tmp_image.resolve()): [pred]},
+            )
 
     def test_push_empty_list(self, client: LabelStudioClient, mock_ls) -> None:
         with mock_ls:
@@ -172,11 +228,17 @@ class TestPullAnnotations:
         assert len(result) == 2
 
     def test_pull_annotations_since(self, client: LabelStudioClient, mock_ls) -> None:
-        mock_ls.get(f"{LS_URL}/api/projects/1/export", json=[])
+        export = [
+            {"id": 1, "updated_at": "2025-12-31T23:59:59Z"},
+            {"id": 2, "updated_at": "2026-01-01T00:00:00Z"},
+            {"id": 3, "updated_at": "2026-01-02T00:00:00Z"},
+            {"id": 4},
+        ]
+        mock_ls.get(f"{LS_URL}/api/projects/1/export", json=export)
 
         with mock_ls:
             result = client.pull_annotations(1, since="2026-01-01T00:00:00Z")
-        assert result == []
+        assert [task["id"] for task in result] == [2, 3]
 
 
 # ---------------------------------------------------------------------------
@@ -185,19 +247,36 @@ class TestPullAnnotations:
 
 class TestStatusManagement:
     def test_set_status(self, client: LabelStudioClient, mock_ls) -> None:
-        mock_ls.patch(f"{LS_URL}/api/tasks/10/", json={"id": 10, "status": "accepted"})
+        mock_ls.get(f"{LS_URL}/api/tasks/10/", json={"id": 10, "meta": {"batch": "a"}})
+        mock_ls.patch(
+            f"{LS_URL}/api/tasks/10/",
+            json={"id": 10, "meta": {"batch": "a", "lumen_status": "accepted"}},
+        )
 
         with mock_ls:
             result = client.set_status(10, "accepted")
-        assert result["status"] == "accepted"
+        assert result["meta"] == {"batch": "a", "lumen_status": "accepted"}
+        assert mock_ls.last_request is not None
+        assert mock_ls.last_request.json() == {
+            "meta": {"batch": "a", "lumen_status": "accepted"}
+        }
 
     def test_mark_reviewed(self, client: LabelStudioClient, mock_ls) -> None:
-        mock_ls.patch(f"{LS_URL}/api/tasks/1/", json={"id": 1, "status": "accepted"})
-        mock_ls.patch(f"{LS_URL}/api/tasks/2/", json={"id": 2, "status": "accepted"})
+        mock_ls.get(f"{LS_URL}/api/tasks/1/", json={"id": 1, "meta": {}})
+        mock_ls.patch(
+            f"{LS_URL}/api/tasks/1/",
+            json={"id": 1, "meta": {"lumen_status": "accepted"}},
+        )
+        mock_ls.get(f"{LS_URL}/api/tasks/2/", json={"id": 2, "meta": {}})
+        mock_ls.patch(
+            f"{LS_URL}/api/tasks/2/",
+            json={"id": 2, "meta": {"lumen_status": "accepted"}},
+        )
 
         with mock_ls:
             results = client.mark_reviewed([1, 2])
         assert len(results) == 2
+        assert all(r["meta"]["lumen_status"] == "accepted" for r in results)
 
 
 # ---------------------------------------------------------------------------
