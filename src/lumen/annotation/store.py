@@ -169,5 +169,93 @@ class LabellingTaskStore:
                 session.expunge(t)
             return tasks
 
+    def get_by_status(self, status: TaskStatus) -> list[LabellingTask]:
+        """Alias for list_by_status."""
+        return self.list_by_status(status)
+
+    def upsert(
+        self,
+        *,
+        image_path: str,
+        project_id: int,
+        ls_task_id: int | None = None,
+        status: TaskStatus = "unlabelled",
+        model_version: str | None = None,
+        prediction_hash: str | None = None,
+    ) -> LabellingTask:
+        """Insert or update a task. Matches on (image_path, project_id)."""
+        if status not in VALID_STATUSES:
+            raise ValueError(f"Invalid status {status!r}. Must be one of {VALID_STATUSES}")
+        with self._session() as session:
+            task = (
+                session.query(LabellingTask)
+                .filter(
+                    LabellingTask.image_path == image_path,
+                    LabellingTask.project_id == project_id,
+                )
+                .one_or_none()
+            )
+            if task is None:
+                task = LabellingTask(
+                    image_path=image_path,
+                    project_id=project_id,
+                    ls_task_id=ls_task_id,
+                    status=status,
+                    model_version=model_version,
+                    prediction_hash=prediction_hash,
+                )
+                session.add(task)
+            else:
+                if ls_task_id is not None:
+                    task.ls_task_id = ls_task_id
+                if model_version is not None:
+                    task.model_version = model_version
+                if prediction_hash is not None:
+                    task.prediction_hash = prediction_hash
+                task.status = status
+            session.commit()
+            session.expunge(task)
+            return task
+
+    def mark_predicted(
+        self,
+        ls_task_id: int,
+        model_version: str | None = None,
+        prediction_hash: str | None = None,
+    ) -> LabellingTask | None:
+        """Transition a task to 'predicted' status."""
+        with self._session() as session:
+            task = (
+                session.query(LabellingTask)
+                .filter(LabellingTask.ls_task_id == ls_task_id)
+                .one_or_none()
+            )
+            if task is None:
+                return None
+            task.status = "predicted"
+            if model_version is not None:
+                task.model_version = model_version
+            if prediction_hash is not None:
+                task.prediction_hash = prediction_hash
+            session.commit()
+            session.expunge(task)
+            return task
+
+    def mark_reviewed(self, ls_task_id: int, accepted: bool = True) -> LabellingTask | None:
+        """Transition a task to 'accepted' or 'rejected'."""
+        status: TaskStatus = "accepted" if accepted else "rejected"
+        with self._session() as session:
+            task = (
+                session.query(LabellingTask)
+                .filter(LabellingTask.ls_task_id == ls_task_id)
+                .one_or_none()
+            )
+            if task is None:
+                return None
+            task.status = status
+            session.commit()
+            session.expunge(task)
+            return task
+
 
 __all__ = ["LabellingTaskStore", "LabellingTask", "TaskStatus"]

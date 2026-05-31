@@ -43,6 +43,14 @@ class LabelStudioClient:
     def base_url(self) -> str:
         return self._url
 
+    def health(self) -> bool:
+        """Check Label Studio server connectivity."""
+        try:
+            resp = self._session.get(f"{self._url}/api/health", timeout=5)
+            return resp.status_code == 200
+        except requests.RequestException:
+            return False
+
     # ------------------------------------------------------------------
     # Project management
     # ------------------------------------------------------------------

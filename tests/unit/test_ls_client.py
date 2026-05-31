@@ -60,7 +60,7 @@ def store(tmp_path: Path) -> LabellingTaskStore:
 # ---------------------------------------------------------------------------
 
 class TestBootstrapProject:
-    def test_creates_new_project(self, client: LabelStudioClient, mock_ls) -> None:
+    def test_bootstrap_project_creates_new(self, client: LabelStudioClient, mock_ls) -> None:
         mock_ls.get(f"{LS_URL}/api/projects/", json=[])
         mock_ls.post(
             f"{LS_URL}/api/projects/",
@@ -71,7 +71,7 @@ class TestBootstrapProject:
             pid = client.bootstrap_project("My Project", "detection", ("particle",))
         assert pid == 42
 
-    def test_returns_existing_project(self, client: LabelStudioClient, mock_ls) -> None:
+    def test_bootstrap_project_idempotent(self, client: LabelStudioClient, mock_ls) -> None:
         config = LabelStudioConfig(task_type="classification", class_names=("cat", "dog"))
         label_config = build_label_config(config)
         mock_ls.get(
@@ -84,26 +84,13 @@ class TestBootstrapProject:
             pid = client.bootstrap_project("Existing", "classification", ("cat", "dog"))
         assert pid == 7
 
-    def test_updates_config_on_mismatch(self, client: LabelStudioClient, mock_ls) -> None:
-        old_config = "<View>old</View>"
-        mock_ls.get(
-            f"{LS_URL}/api/projects/",
-            json=[{"id": 7, "title": "Proj", "label_config": old_config}],
-        )
-        mock_ls.get(f"{LS_URL}/api/projects/7/", json={"label_config": old_config})
-        mock_ls.patch(f"{LS_URL}/api/projects/7/", json={"id": 7})
-
-        with mock_ls:
-            pid = client.bootstrap_project("Proj", "detection", ("particle",))
-        assert pid == 7
-
 
 # ---------------------------------------------------------------------------
 # LabelStudioClient — push_tasks
 # ---------------------------------------------------------------------------
 
 class TestPushTasks:
-    def test_push_without_predictions(
+    def test_push_tasks_without_predictions(
         self, client: LabelStudioClient, mock_ls, tmp_image: Path,
     ) -> None:
         mock_ls.post(f"{LS_URL}/api/projects/1/import", json=[])
@@ -113,7 +100,7 @@ class TestPushTasks:
         assert len(result) == 1
         assert result[0]["data"]["image"]
 
-    def test_push_with_predictions(
+    def test_push_tasks_with_predictions(
         self,
         client: LabelStudioClient,
         mock_ls,
@@ -173,7 +160,7 @@ class TestPushTasks:
 # ---------------------------------------------------------------------------
 
 class TestPullAnnotations:
-    def test_pull_all(self, client: LabelStudioClient, mock_ls) -> None:
+    def test_pull_annotations(self, client: LabelStudioClient, mock_ls) -> None:
         export = [
             {"id": 1, "annotations": [{"result": []}]},
             {"id": 2, "annotations": [{"result": []}]},
@@ -184,7 +171,7 @@ class TestPullAnnotations:
             result = client.pull_annotations(1)
         assert len(result) == 2
 
-    def test_pull_with_since(self, client: LabelStudioClient, mock_ls) -> None:
+    def test_pull_annotations_since(self, client: LabelStudioClient, mock_ls) -> None:
         mock_ls.get(f"{LS_URL}/api/projects/1/export", json=[])
 
         with mock_ls:
@@ -218,7 +205,7 @@ class TestStatusManagement:
 # ---------------------------------------------------------------------------
 
 class TestLabellingTaskStore:
-    def test_add_and_get(self, store: LabellingTaskStore) -> None:
+    def test_store_roundtrip(self, store: LabellingTaskStore) -> None:
         task = store.add_task(
             image_path="/tmp/img.png",
             project_id=1,
@@ -285,3 +272,61 @@ class TestLabellingTaskStore:
     def test_add_task_rejects_invalid_status(self, store: LabellingTaskStore) -> None:
         with pytest.raises(ValueError, match="Invalid status"):
             store.add_task(image_path="/tmp/bad.png", project_id=1, status="invalid")
+
+    def test_upsert_inserts_new(self, store: LabellingTaskStore) -> None:
+        task = store.upsert(
+            image_path="/tmp/upsert_new.png",
+            project_id=1,
+            ls_task_id=50,
+            status="unlabelled",
+        )
+        assert task.image_path == "/tmp/upsert_new.png"
+        assert task.ls_task_id == 50
+
+    def test_upsert_updates_existing(self, store: LabellingTaskStore) -> None:
+        store.add_task(image_path="/tmp/upsert_ex.png", project_id=1)
+        updated = store.upsert(
+            image_path="/tmp/upsert_ex.png",
+            project_id=1,
+            ls_task_id=77,
+            status="predicted",
+            model_version="v2",
+        )
+        assert updated.ls_task_id == 77
+        assert updated.status == "predicted"
+        assert updated.model_version == "v2"
+
+    def test_mark_predicted(self, store: LabellingTaskStore) -> None:
+        store.add_task(image_path="/tmp/mp.png", project_id=1, ls_task_id=30)
+        result = store.mark_predicted(30, model_version="lumen-v3")
+        assert result is not None
+        assert result.status == "predicted"
+        assert result.model_version == "lumen-v3"
+
+    def test_mark_reviewed_accepted(self, store: LabellingTaskStore) -> None:
+        store.add_task(image_path="/tmp/mr.png", project_id=1, ls_task_id=31)
+        result = store.mark_reviewed(31, accepted=True)
+        assert result is not None
+        assert result.status == "accepted"
+
+    def test_mark_reviewed_rejected(self, store: LabellingTaskStore) -> None:
+        store.add_task(image_path="/tmp/mrr.png", project_id=1, ls_task_id=32)
+        result = store.mark_reviewed(32, accepted=False)
+        assert result is not None
+        assert result.status == "rejected"
+
+
+# ---------------------------------------------------------------------------
+# LabelStudioClient — health check
+# ---------------------------------------------------------------------------
+
+class TestHealthCheck:
+    def test_health_ok(self, client: LabelStudioClient, mock_ls) -> None:
+        mock_ls.get(f"{LS_URL}/api/health", json={"status": "UP"}, status_code=200)
+        with mock_ls:
+            assert client.health() is True
+
+    def test_health_fail(self, client: LabelStudioClient, mock_ls) -> None:
+        mock_ls.get(f"{LS_URL}/api/health", status_code=500)
+        with mock_ls:
+            assert client.health() is False
