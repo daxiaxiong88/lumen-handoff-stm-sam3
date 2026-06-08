@@ -29,6 +29,7 @@ dependencies = [
 ]
 
 [project.scripts]
+lumen = "lumen.cli:main"
 lumen-download-models = "lumen.models.download:main"
 
 [project.optional-dependencies]
@@ -40,6 +41,11 @@ dev = [
     "mypy>=1.5",
     "pre-commit>=3.3",
     "requests-mock>=1.11",
+    "httpx>=0.25",
+]
+serve = [
+    "fastapi>=0.100",
+    "uvicorn[standard]>=0.23",
 ]
 roboflow = [
     "roboflow>=1.1.0",
