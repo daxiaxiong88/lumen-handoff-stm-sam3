@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as nn_functional
 
+from lumen.models._token_utils import tokens_to_feature_map
 from lumen.models.registry import register_head
 
 
@@ -120,6 +123,129 @@ class SegmentationHead(nn.Module):
                 x, size=image_size, mode="bilinear", align_corners=False
             )
         return x
+
+class DINOv3LinearSegmentationHead(nn.Module):
+    """Official DINOv3 linear segmentation baseline adapted to Lumen.
+
+    This module is adapted from the official DINOv3 evaluation decoder
+    `dinov3.eval.segmentation.models.heads.linear_head.LinearHead`, but takes
+    Lumen-friendly token tensors. It expects one or more intermediate token
+    tensors from a ViT backbone, reshapes each `(B, N, D)` tensor back to a
+    spatial grid, upsamples all feature maps to the finest resolution, and
+    applies the original batchnorm + 1x1 classifier projection.
+
+    The head is intentionally lightweight and suitable as a re-trainable
+    baseline when only the DINOv3 backbone checkpoint is available.
+    """
+
+    def __init__(
+        self,
+        embed_dim: int | Sequence[int],
+        num_classes: int,
+        patch_size: int = 16,
+        num_feature_levels: int = 4,
+        dropout: float = 0.1,
+        use_batchnorm: bool = True,
+    ) -> None:
+        super().__init__()
+        if isinstance(embed_dim, int):
+            in_channels = [embed_dim] * num_feature_levels
+        else:
+            in_channels = list(embed_dim)
+        if not in_channels:
+            raise ValueError("DINOv3LinearSegmentationHead requires features")
+
+        self.patch_size = patch_size
+        self.in_channels = in_channels
+        self.channels = sum(in_channels)
+        self.dropout = nn.Dropout2d(dropout)
+        self.batchnorm_layer = (
+            nn.BatchNorm2d(self.channels) if use_batchnorm else nn.Identity()
+        )
+        self.conv = nn.Conv2d(self.channels, num_classes, kernel_size=1)
+        self.needs_multiscale_features = True
+        nn.init.normal_(self.conv.weight, mean=0.0, std=0.01)
+        if self.conv.bias is not None:
+            nn.init.constant_(self.conv.bias, 0.0)
+
+    def _transform_inputs(
+        self,
+        inputs: torch.Tensor | Sequence[torch.Tensor],
+        image_size: tuple[int, int],
+    ) -> torch.Tensor:
+        features = [inputs] if isinstance(inputs, torch.Tensor) else list(inputs)
+        if len(features) != len(self.in_channels):
+            raise ValueError(
+                f"Expected {len(self.in_channels)} feature maps, got "
+                f"{len(features)}"
+            )
+
+        maps = []
+        for feature, channels in zip(features, self.in_channels):
+            if feature.dim() == 3:
+                feature = tokens_to_feature_map(
+                    feature,
+                    image_size=image_size,
+                    patch_size=self.patch_size,
+                )
+            elif feature.dim() != 4:
+                raise ValueError(
+                    f"Expected 3-D tokens or 4-D feature maps, got shape "
+                    f"{tuple(feature.shape)}"
+                )
+            if feature.shape[1] != channels:
+                raise ValueError(
+                    f"Expected feature map with {channels} channels, got "
+                    f"{feature.shape[1]}"
+                )
+            maps.append(feature)
+
+        target_size = maps[0].shape[2:]
+        resized = [
+            nn_functional.interpolate(
+                fmap,
+                size=target_size,
+                mode="bilinear",
+                align_corners=False,
+            )
+            for fmap in maps
+        ]
+        return torch.cat(resized, dim=1)
+
+    def forward(
+        self,
+        inputs: torch.Tensor | Sequence[torch.Tensor],
+        image_size: tuple[int, int],
+    ) -> torch.Tensor:
+        return self._forward_logits(inputs, image_size, dropout=self.training)
+
+    def predict(
+        self,
+        inputs: torch.Tensor | Sequence[torch.Tensor],
+        image_size: tuple[int, int],
+    ) -> torch.Tensor:
+        """Evaluation-style forward pass without dropout."""
+        return self._forward_logits(inputs, image_size, dropout=False)
+
+    def _forward_logits(
+        self,
+        inputs: torch.Tensor | Sequence[torch.Tensor],
+        image_size: tuple[int, int],
+        *,
+        dropout: bool,
+    ) -> torch.Tensor:
+        features = self._transform_inputs(inputs, image_size=image_size)
+        if dropout:
+            features = self.dropout(features)
+        logits = self.conv(self.batchnorm_layer(features))
+        if logits.shape[2:] != image_size:
+            logits = nn_functional.interpolate(
+                logits,
+                size=image_size,
+                mode="bilinear",
+                align_corners=False,
+            )
+        return logits  # type: ignore[no-any-return]
 
 
 class PyramidPoolingModule(nn.Module):
@@ -438,6 +564,25 @@ def _build_upernet_segmentation_head(
         num_classes=num_classes,
         patch_size=patch_size,
         decoder_channels=decoder_channels,
+    )
+
+
+@register_head("dinov3-linear")
+def _build_dinov3_linear_segmentation_head(
+    embed_dim: int | Sequence[int],
+    num_classes: int,
+    patch_size: int = 16,
+    num_feature_levels: int = 4,
+    dropout: float = 0.1,
+    use_batchnorm: bool = True,
+) -> DINOv3LinearSegmentationHead:
+    return DINOv3LinearSegmentationHead(
+        embed_dim=embed_dim,
+        num_classes=num_classes,
+        patch_size=patch_size,
+        num_feature_levels=num_feature_levels,
+        dropout=dropout,
+        use_batchnorm=use_batchnorm,
     )
 
 

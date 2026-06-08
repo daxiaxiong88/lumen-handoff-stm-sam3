@@ -12,13 +12,11 @@ import argparse
 from pathlib import Path
 
 import torch
-import torch.nn.functional as nn_functional
 from torch.utils.data import DataLoader, random_split
 from tqdm import tqdm
 
-from lumen import ModelSwitcher, preset_configs
-from lumen.data import ScientificImageDataset, SegmentationPairDataset
-from lumen.models import build_encoder, build_head
+from lumen.data import SegmentationPairDataset
+from lumen.models import build_encoder as build_registered_encoder
 from lumen.training.downstream import SegmentationTrainer
 from lumen.utils import ExperimentLogger, TrainingHistory
 
@@ -132,14 +130,15 @@ def build_encoder(args: argparse.Namespace) -> tuple[torch.nn.Module, dict]:
     if args.encoder == "eupe-pretrained":
         print(f"Loading pretrained EUPE-{args.eupe_variant.upper()}")
         from lumen.models import load_vendor_eupe_encoder
+
         encoder = load_vendor_eupe_encoder(
             variant=args.eupe_variant,
             device=args.device,
         )
         encoder.train()
     else:
-        print(f"Building EUPE encoder from scratch")
-        encoder = build_encoder("eupe", **encoder_kwargs)
+        print("Building EUPE encoder from scratch")
+        encoder = build_registered_encoder("eupe", **encoder_kwargs)
 
     info = {
         "name": f"EUPE-{args.eupe_variant.upper() if args.encoder == 'eupe-pretrained' else 'EUPE'}",
@@ -216,20 +215,24 @@ def train_epoch(
         images = batch["image"].to(device)
         masks = batch["mask"].to(device)
 
-        with torch.cuda.amp.autocast() if mixed_precision else torch.no_grad():
+        trainer.optimizer.zero_grad()
+
+        if mixed_precision:
+            with torch.cuda.amp.autocast():
+                outputs = trainer.model(images)
+                loss = trainer.segmentation_criterion(outputs, masks)
             if scaler:
-                with scaler.scale():
-                    outputs = trainer.model(images)
-                    loss = trainer.segmentation_criterion(outputs, masks)
+                scaler.scale(loss).backward()
                 scaler.step(trainer.optimizer)
                 scaler.update()
             else:
-                outputs = trainer.model(images)
-                loss = trainer.segmentation_criterion(outputs, masks)
                 loss.backward()
                 trainer.optimizer.step()
-
-        trainer.optimizer.zero_grad()
+        else:
+            outputs = trainer.model(images)
+            loss = trainer.segmentation_criterion(outputs, masks)
+            loss.backward()
+            trainer.optimizer.step()
 
         # Compute Dice for logging
         with torch.no_grad():
@@ -310,14 +313,7 @@ def main() -> None:
     print(f"  Embed dim: {encoder_info['embed_dim']}")
     print(f"  Patch size: {encoder_info['patch_size']}")
 
-    # Build segmentation head
     print(f"\nSegmentation head: {args.head}")
-    head = build_head(
-        args.head,
-        embed_dim=encoder.embed_dim,
-        num_classes=args.num_classes,
-        patch_size=encoder.patch_size,
-    )
 
     # Create trainer
     trainer = SegmentationTrainer(

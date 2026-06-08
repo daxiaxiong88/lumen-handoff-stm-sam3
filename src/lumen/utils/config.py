@@ -399,6 +399,28 @@ def _dataclass_field_types(cls: type) -> dict[str, Any]:
     return {f.name: hints.get(f.name, f.type) for f in fields(cls)}
 
 
+def _unknown_keys(cls: type, raw: Any, prefix: str = "") -> list[str]:
+    if not isinstance(raw, dict):
+        return []
+    type_map = _dataclass_field_types(cls)
+    unknown: list[str] = []
+    for key, value in raw.items():
+        field_name = key if key in type_map else _resolve_field_alias(key)
+        path = f"{prefix}.{key}" if prefix else key
+        if field_name not in type_map:
+            unknown.append(path)
+            continue
+        field_type = type_map[field_name]
+        if isinstance(field_type, type) and is_dataclass(field_type):
+            unknown.extend(_unknown_keys(field_type, value, path))
+        elif get_origin(field_type) is list:
+            item_type = get_args(field_type)[0]
+            if isinstance(item_type, type) and is_dataclass(item_type) and isinstance(value, list):
+                for idx, item in enumerate(value):
+                    unknown.extend(_unknown_keys(item_type, item, f"{path}[{idx}]"))
+    return unknown
+
+
 def _build_dataclass(cls: type, raw: Any) -> Any:
     """Build a dataclass instance from a (possibly partial) nested dict.
 
@@ -410,15 +432,16 @@ def _build_dataclass(cls: type, raw: Any) -> Any:
     type_map = _dataclass_field_types(cls)
     kwargs: dict[str, Any] = {}
     for key, value in raw.items():
-        if key not in type_map:
+        field_name = key if key in type_map else _resolve_field_alias(key)
+        if field_name not in type_map:
             continue
-        field_type = type_map[key]
+        field_type = type_map[field_name]
         if (
             isinstance(field_type, type)
             and is_dataclass(field_type)
             and isinstance(value, dict)
         ):
-            kwargs[key] = _build_dataclass(field_type, value)
+            kwargs[field_name] = _build_dataclass(field_type, value)
         elif get_origin(field_type) is list:
             item_type = get_args(field_type)[0]
             if (
@@ -426,11 +449,13 @@ def _build_dataclass(cls: type, raw: Any) -> Any:
                 and is_dataclass(item_type)
                 and isinstance(value, list)
             ):
-                kwargs[key] = [_build_dataclass(item_type, item) for item in value]
+                kwargs[field_name] = [
+                    _build_dataclass(item_type, item) for item in value
+                ]
             else:
-                kwargs[key] = value
+                kwargs[field_name] = value
         else:
-            kwargs[key] = value
+            kwargs[field_name] = value
     return cls(**kwargs)
 
 
@@ -444,7 +469,7 @@ def _dict_to_config(d: dict[str, Any]) -> LumenConfig:
     return _build_dataclass(LumenConfig, d)  # type: ignore[no-any-return]
 
 
-def load_config(path: str) -> LumenConfig:
+def load_config(path: str, *, strict_unknown: bool = False) -> LumenConfig:
     """Load a :class:`LumenConfig` from a YAML file with default merging.
 
     Args:
@@ -460,6 +485,9 @@ def load_config(path: str) -> LumenConfig:
         user = yaml.safe_load(fh) or {}
     if not isinstance(user, dict):
         raise ValueError(f"Config root must be a mapping, got {type(user).__name__}")
+    unknown = _unknown_keys(LumenConfig, user)
+    if unknown and strict_unknown:
+        raise ValueError(f"Unknown config key(s): {', '.join(unknown)}")
     cfg = _dict_to_config(user)
     cfg.validate()
     return cfg

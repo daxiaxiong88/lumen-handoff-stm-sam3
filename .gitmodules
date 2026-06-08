@@ -1,0 +1,3 @@
+[submodule "vendor/EUPE"]
+	path = vendor/EUPE
+	url = https://github.com/facebookresearch/EUPE

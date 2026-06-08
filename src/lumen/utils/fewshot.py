@@ -22,7 +22,7 @@ from sklearn.metrics import (
     recall_score,
 )
 from torch.utils.data import DataLoader, Dataset, Subset
-from tqdm import tqdm
+from tqdm import tqdm  # type: ignore[import-untyped]
 
 
 @dataclass

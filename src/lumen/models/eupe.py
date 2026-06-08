@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -8,6 +9,7 @@ from typing import Literal
 import torch
 import torch.nn as nn
 
+from lumen.models.download import ensure_model_asset, legacy_eupe_path
 from lumen.models.encoder_base import EncoderBase
 from lumen.models.registry import register_encoder
 
@@ -35,7 +37,9 @@ def _repo_root_from_here() -> Path:
 def _ensure_vendor_on_path(vendor_dir: str | Path | None = None) -> Path:
     repo_root = _repo_root_from_here()
     vendor_path = (
-        Path(vendor_dir) if vendor_dir is not None else repo_root / "vendor" / "EUPE"
+        Path(vendor_dir)
+        if vendor_dir is not None
+        else Path(os.environ.get("LUMEN_EUPE_VENDOR_DIR", repo_root / "vendor" / "EUPE"))
     )
     if not vendor_path.exists():
         raise FileNotFoundError(f"Vendor EUPE directory does not exist: {vendor_path}")
@@ -230,9 +234,10 @@ def load_vendor_eupe_encoder(
     vendor_dir: str | Path | None = None,
     device: torch.device | str | None = None,
     strict: bool = False,
+    download: bool = False,
+    model_id: str | None = None,
 ) -> EUPEEncoder:
     """Load a local official EUPE ViT checkpoint for scientific images."""
-    repo_root = _repo_root_from_here()
     names = {
         "vit_t": "EUPE-ViT-T.pt",
         "vit_s": "EUPE-ViT-S.pt",
@@ -240,11 +245,25 @@ def load_vendor_eupe_encoder(
     }
     if variant not in names:
         raise ValueError(f"Unknown EUPE variant: {variant!r}")
-    ckpt_path = (
-        Path(weights_path)
-        if weights_path
-        else repo_root / "model" / "eupe" / names[variant]
-    )
+    if weights_path is not None:
+        ckpt_path = Path(weights_path)
+    else:
+        ckpt_path = ensure_model_asset(
+            "eupe",
+            variant=variant,
+            model_id=model_id,
+            download=download,
+        )
+        if not ckpt_path.exists():
+            legacy = legacy_eupe_path(variant)
+            if legacy is not None:
+                ckpt_path = legacy
+    if not ckpt_path.exists():
+        raise FileNotFoundError(
+            f"EUPE checkpoint not found: {ckpt_path}. Expected {names[variant]} "
+            "under model/eupe/ or legacy weights/. Pass download=True with a "
+            "configured ModelScope EUPE model id to fetch it."
+        )
     encoder = EUPEEncoder.from_pretrained(
         ckpt_path,
         device=device,

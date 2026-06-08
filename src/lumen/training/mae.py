@@ -228,6 +228,9 @@ class MAETrainer(nn.Module):
         h, w = x.shape[2], x.shape[3]
         num_patches_h = h // p
         num_patches_w = w // p
+        if num_patches_h <= 0 or num_patches_w <= 0:
+            raise ValueError("Input is smaller than one MAE patch")
+        x = x[:, :, : num_patches_h * p, : num_patches_w * p]
         x = x.reshape(x.shape[0], c, num_patches_h, p, num_patches_w, p)
         x = x.permute(0, 2, 4, 1, 3, 5).contiguous()
         return x.reshape(x.shape[0], num_patches_h * num_patches_w, c * p * p)
@@ -273,13 +276,16 @@ class MAETrainer(nn.Module):
         num_patches_w = w // p
         num_patches = num_patches_h * num_patches_w
 
-        target = self.patchify(x)
+        if num_patches_h <= 0 or num_patches_w <= 0:
+            raise ValueError("Input is smaller than one MAE patch")
+        cropped = x[:, :, : num_patches_h * p, : num_patches_w * p]
+        target = self.patchify(cropped)
         mask = self.random_mask(batch_size, num_patches, x.device)
 
         if getattr(self.encoder, "supports_masked_tokens", False):
-            latent = self.encoder.forward_masked_tokens(x, mask)
+            latent = self.encoder.forward_masked_tokens(cropped, mask)
         else:
-            latent = self.encoder(x)
+            latent = self.encoder(cropped)
         visible = (~mask).unsqueeze(-1).expand_as(latent)
         latent_visible = latent[visible].reshape(batch_size, -1, latent.shape[-1])
 
@@ -330,6 +336,8 @@ class MAETrainer(nn.Module):
             self.optimizer.zero_grad(set_to_none=True)
             out["loss"].backward()
             self.optimizer.step()
+            if self.scheduler is not None:
+                self.scheduler.step()
             return {
                 "loss": float(out["loss"].detach()),
                 "mae_loss": float(out["loss"].detach()),

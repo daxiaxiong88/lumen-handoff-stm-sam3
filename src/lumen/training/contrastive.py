@@ -204,15 +204,15 @@ class ContrastiveTrainer(nn.Module):
         weight_decay: float = 1e-4,
     ) -> None:
         super().__init__()
+        if pool != "mean":
+            raise ValueError(
+                "ContrastiveTrainer currently supports only pool='mean'. "
+                "Lumen encoders expose patch tokens, not a pre-encoder CLS token."
+            )
         self.encoder = encoder
         self.temperature = temperature
         self.pool = pool
-
-        if pool == "cls":
-            self.cls_token = nn.Parameter(torch.zeros(1, 1, encoder.embed_dim))
-            nn.init.trunc_normal_(self.cls_token, std=0.02)
-        else:
-            self.cls_token = None  # type: ignore[assignment]
+        self.cls_token = None  # type: ignore[assignment]
 
         if projection_head is None:
             self.projection_head = ProjectionHead(encoder.embed_dim)
@@ -243,9 +243,6 @@ class ContrastiveTrainer(nn.Module):
         Returns:
             Pooled features of shape ``(B, embed_dim)``.
         """
-        if self.pool == "cls" and self.cls_token is not None:
-            # Prepend CLS token (assumes encoder was run with CLS appended)
-            return x[:, 0]
         return x.mean(dim=1)
 
     def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
@@ -266,19 +263,8 @@ class ContrastiveTrainer(nn.Module):
         h1 = self.encoder(x1)
         h2 = self.encoder(x2)
 
-        if self.pool == "cls" and self.cls_token is not None:
-            # Append CLS token before encoding
-            batch_size = x1.shape[0]
-            cls = self.cls_token.expand(batch_size, -1, -1)
-            h1 = torch.cat([cls, h1], dim=1)
-            h2 = torch.cat([cls, h2], dim=1)
-            # Re-encode is expensive; instead we just mean-pool in practice.
-            # To keep it simple and correct, we mean-pool here regardless.
-            h1 = h1.mean(dim=1)
-            h2 = h2.mean(dim=1)
-        else:
-            h1 = self._pool_features(h1)
-            h2 = self._pool_features(h2)
+        h1 = self._pool_features(h1)
+        h2 = self._pool_features(h2)
 
         z1 = self.projection_head(h1)
         z2 = self.projection_head(h2)
@@ -302,6 +288,8 @@ class ContrastiveTrainer(nn.Module):
             self.optimizer.zero_grad(set_to_none=True)
             out["loss"].backward()
             self.optimizer.step()
+            if self.scheduler is not None:
+                self.scheduler.step()
             loss_value = float(out["loss"].detach())
             return {"loss": loss_value, "contrastive_loss": loss_value}
         return {"loss": out["loss"], "contrastive_loss": out["loss"]}
