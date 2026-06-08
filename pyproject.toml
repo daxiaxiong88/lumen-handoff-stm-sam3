@@ -29,6 +29,7 @@ dependencies = [
 ]
 
 [project.scripts]
+lumen = "lumen.cli:main"
 lumen-download-models = "lumen.models.download:main"
 
 [project.optional-dependencies]

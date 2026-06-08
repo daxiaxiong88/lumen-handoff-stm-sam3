@@ -126,3 +126,39 @@ Integration tests are skipped by default. To run them against a local Label Stud
 ```bash
 LS_URL=http://localhost:8080 LS_API_KEY=your-token pytest tests/integration/test_ls_integration.py -v
 ```
+
+
+## Closing the loop
+
+Use `ReviewLoop` to pull accepted Label Studio corrections, convert them back
+into Lumen training labels, track reviewer/correction metadata in the SQLite
+labelling store, and write deterministic train/val/holdout splits with a seed
+pinned per Label Studio project.
+
+```python
+from lumen.annotation import LabelStudioClient, LabelStudioConfig, ReviewLoop, ReviewLoopConfig
+
+client = LabelStudioClient(url="http://localhost:8080", api_key="your-token")
+loop = ReviewLoop(
+    client,
+    ReviewLoopConfig(
+        label_config=LabelStudioConfig(task_type="segmentation", class_names=("cell",)),
+    ),
+)
+corrected = loop.pull(project_id=123)
+```
+
+Dry-run a retraining pipeline before launching project-specific training:
+
+```bash
+lumen retrain run configs/pipelines/livecell_retrain.yaml --dry-run
+```
+
+Promote a checkpoint only when its quality gate passes. Registry manifests are
+stored as JSON under `weights/registry/`, and `lumen model list` shows current
+aliases and metrics.
+
+```bash
+lumen model promote weights/livecell/2026-05-29-1234.pt --as eupe-livecell@latest --on "miou_delta>=+0.01"
+lumen model list
+```

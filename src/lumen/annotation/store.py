@@ -5,7 +5,16 @@ from __future__ import annotations
 import datetime
 from typing import Literal
 
-from sqlalchemy import Column, DateTime, Integer, String, create_engine
+from sqlalchemy import (
+    Column,
+    DateTime,
+    Float,
+    Integer,
+    String,
+    create_engine,
+    inspect,
+    text,
+)
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
 TaskStatus = Literal["unlabelled", "predicted", "in_review", "accepted", "rejected"]
@@ -31,6 +40,8 @@ class LabellingTask(Base):
     status = Column(String(32), nullable=False, default="unlabelled", index=True)
     model_version = Column(String(64), nullable=True)
     prediction_hash = Column(String(64), nullable=True)
+    correction_diff_iou = Column(Float, nullable=True)
+    reviewer_id = Column(String(128), nullable=True)
     updated_at = Column(
         DateTime,
         nullable=False,
@@ -58,10 +69,26 @@ class LabellingTaskStore:
     def __init__(self, db_url: str = "sqlite:///labelling_tasks.db") -> None:
         self._engine = create_engine(db_url)
         Base.metadata.create_all(self._engine)
+        self._ensure_schema()
         self._session_factory = sessionmaker(bind=self._engine, expire_on_commit=False)
 
     def _session(self) -> Session:
         return self._session_factory()
+
+    def _ensure_schema(self) -> None:
+        """Add review-loop columns to older SQLite stores."""
+        inspector = inspect(self._engine)
+        existing = {col["name"] for col in inspector.get_columns("labelling_tasks")}
+        statements = []
+        if "correction_diff_iou" not in existing:
+            statements.append("ALTER TABLE labelling_tasks ADD COLUMN correction_diff_iou FLOAT")
+        if "reviewer_id" not in existing:
+            statements.append("ALTER TABLE labelling_tasks ADD COLUMN reviewer_id VARCHAR(128)")
+        if not statements:
+            return
+        with self._engine.begin() as conn:
+            for statement in statements:
+                conn.execute(text(statement))
 
     def add_task(
         self,
@@ -257,5 +284,43 @@ class LabellingTaskStore:
             session.expunge(task)
             return task
 
+    def record_correction(
+        self,
+        *,
+        image_path: str,
+        project_id: int,
+        ls_task_id: int,
+        status: TaskStatus = "accepted",
+        correction_diff_iou: float | None = None,
+        reviewer_id: str | None = None,
+    ) -> LabellingTask:
+        """Upsert a reviewed task and attach correction metadata."""
+        if status not in VALID_STATUSES:
+            raise ValueError(f"Invalid status {status!r}. Must be one of {VALID_STATUSES}")
+        with self._session() as session:
+            task = (
+                session.query(LabellingTask)
+                .filter(
+                    LabellingTask.image_path == image_path,
+                    LabellingTask.project_id == project_id,
+                )
+                .one_or_none()
+            )
+            if task is None:
+                task = LabellingTask(
+                    image_path=image_path,
+                    project_id=project_id,
+                    ls_task_id=ls_task_id,
+                    status=status,
+                )
+                session.add(task)
+            else:
+                task.ls_task_id = ls_task_id
+                task.status = status
+            task.correction_diff_iou = correction_diff_iou
+            task.reviewer_id = reviewer_id
+            session.commit()
+            session.expunge(task)
+            return task
 
 __all__ = ["LabellingTaskStore", "LabellingTask", "TaskStatus"]

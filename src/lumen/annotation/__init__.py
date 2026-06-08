@@ -14,6 +14,9 @@ __all__ = [
     "LabelStudioClient",
     "LabelStudioConfig",
     "LabellingTaskStore",
+    "ReviewLoop",
+    "ReviewLoopConfig",
+    "CorrectedDataset",
     "build_label_config",
     "export_corrected_labels",
     "prediction_to_label_studio_result",
@@ -29,4 +32,7 @@ def __getattr__(name: str) -> object:
     if name == "LabellingTaskStore":
         from lumen.annotation.store import LabellingTaskStore
         return LabellingTaskStore
+    if name in {"CorrectedDataset", "ReviewLoop", "ReviewLoopConfig"}:
+        from lumen.annotation import review_loop
+        return getattr(review_loop, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
