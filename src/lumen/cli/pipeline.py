@@ -10,7 +10,36 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
-from lumen.utils.config import _coerce
+from lumen.utils.config import _coerce, _resolve_field_alias
+
+
+class PipelineSource(BaseModel):
+    """Source section required to resolve a pipeline input."""
+
+    model_config = ConfigDict(extra="allow")
+
+    type: str = Field(min_length=1)
+    dataset: str | None = None
+    split: str | None = None
+
+
+class PipelineModelSpec(BaseModel):
+    """Model section required to resolve an inference model."""
+
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+    encoder: str = Field(min_length=1)
+    head: str = Field(min_length=1)
+    checkpoint_path: str | None = Field(default=None, alias="ckpt")
+
+
+class PipelineSink(BaseModel):
+    """Optional sink section for downstream handoff."""
+
+    model_config = ConfigDict(extra="allow")
+
+    type: str | None = None
+    project: str | None = None
 
 
 class PipelineModel(BaseModel):
@@ -18,11 +47,11 @@ class PipelineModel(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    source: dict[str, Any] = Field(default_factory=dict)
-    model: dict[str, Any] = Field(default_factory=dict)
+    source: PipelineSource
+    model: PipelineModelSpec
     filter: dict[str, Any] = Field(default_factory=dict)
     sample: dict[str, Any] = Field(default_factory=dict)
-    sink: dict[str, Any] = Field(default_factory=dict)
+    sink: PipelineSink | dict[str, Any] = Field(default_factory=PipelineSink)
 
 
 class PipelineDocument(BaseModel):
@@ -49,7 +78,7 @@ def pipeline_plan(path: str | Path) -> dict[str, Any]:
     doc = load_pipeline_document(path)
     return {
         "pipeline_path": str(Path(path)),
-        "pipeline": doc.model_dump(mode="json"),
+        "pipeline": doc.model_dump(mode="json", by_alias=True),
     }
 
 
@@ -59,7 +88,10 @@ def _apply_pipeline_env_overrides(raw: dict[str, Any]) -> dict[str, Any]:
     for key, value in os.environ.items():
         if not key.startswith(prefix):
             continue
-        parts = ["pipeline", *[part.lower() for part in key[len(prefix) :].split("__")]]
+        parts = [
+            "pipeline",
+            *[_resolve_field_alias(part.lower()) for part in key[len(prefix) :].split("__")],
+        ]
         target: dict[str, Any] = resolved
         for part in parts[:-1]:
             current = target.get(part)
@@ -71,4 +103,12 @@ def _apply_pipeline_env_overrides(raw: dict[str, Any]) -> dict[str, Any]:
     return resolved
 
 
-__all__ = ["PipelineDocument", "PipelineModel", "load_pipeline_document", "pipeline_plan"]
+__all__ = [
+    "PipelineDocument",
+    "PipelineModel",
+    "PipelineModelSpec",
+    "PipelineSink",
+    "PipelineSource",
+    "load_pipeline_document",
+    "pipeline_plan",
+]

@@ -58,6 +58,21 @@ pipeline:
     assert plan["pipeline"]["pipeline"]["model"]["encoder"] == "eupe-pretrained"
 
 
+def test_prelabel_dry_run_rejects_missing_model(tmp_path: Path) -> None:
+    pipeline = tmp_path / "bad_pipeline.yaml"
+    pipeline.write_text(
+        """
+pipeline:
+  source: {type: hyperdata, dataset: livecell}
+"""
+    )
+
+    result = runner.invoke(app, ["prelabel", "run", str(pipeline), "--dry-run"])
+
+    assert result.exit_code != 0
+    assert "model" in result.output
+
+
 def test_model_registry_add_list_promote(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("LUMEN_MODEL_REGISTRY", str(tmp_path / "models.json"))
 
