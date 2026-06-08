@@ -26,9 +26,12 @@ dependencies = [
     "supervision>=0.28.0",
     "minio>=7.2.20",
     "sqlalchemy>=2.0.49",
+    "pydantic>=2.0",
+    "typer>=0.9",
 ]
 
 [project.scripts]
+lumen = "lumen.cli.main:app"
 lumen-download-models = "lumen.models.download:main"
 
 [project.optional-dependencies]

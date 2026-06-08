@@ -501,6 +501,67 @@ class PrelabelRunner:
     def __init__(self, pipeline: PrelabelPipelineConfig) -> None:
         self.pipeline = pipeline
 
+    @classmethod
+    def from_plan(cls, plan: dict[str, Any]) -> PrelabelRunner:
+        """Create a runner from a CLI pipeline plan dict.
+
+        The plan comes from :func:`lumen.cli.pipeline.pipeline_plan` and
+        has the shape::
+
+            {
+              "pipeline": {
+                "source": {...},
+                "model": {...},
+                "filter": {...},
+                "sample": {...},
+                "sink": {...},
+              }
+            }
+        """
+        pipe = plan.get("pipeline", {})
+        src = pipe.get("source", {})
+        mdl = pipe.get("model", {})
+        flt = pipe.get("filter", {})
+        smp = pipe.get("sample", {}).get("active", {})
+        snk = pipe.get("sink", {})
+
+        # Parse filter section
+        ood_raw = flt.get("ood", {})
+        conf_threshold = float(flt.get("confidence_gate", 0.5))
+
+        sink_type = "labelstudio" if snk.get("type") == "label_studio" else "file"
+
+        config = PrelabelPipelineConfig(
+            model=mdl.get("ckpt"),
+            encoder=mdl.get("encoder", "eupe-pretrained"),
+            head=mdl.get("head", "upernet"),
+            task_type="segmentation",
+            device="cpu",
+            source=SourceConfig(
+                type=src.get("type", "local"),
+                root=src.get("root", ""),
+                batch_size=src.get("batch_size", 8),
+            ),
+            sampler=SamplerConfig(
+                strategy=smp.get("method", "entropy"),
+                k=int(smp.get("k", 10)),
+            ),
+            ood=OODConfig(
+                enabled=bool(ood_raw),
+                method=ood_raw.get("method", "energy"),
+                threshold=ood_raw.get("threshold"),
+            ),
+            confidence=ConfidenceConfig(threshold=conf_threshold),
+            sink=SinkConfig(
+                type=sink_type,  # type: ignore[arg-type]
+                output_path=snk.get("output_path", "tasks.json"),
+                ls_url=snk.get("url"),
+                ls_api_key=snk.get("api_key"),
+                ls_project_name=snk.get("project"),
+            ),
+        )
+        return cls(config)
+
     def run(self) -> PrelabelReport:
         """Execute the prelabel pipeline and return a summary report."""
         cfg = self.pipeline

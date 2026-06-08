@@ -397,3 +397,70 @@ class TestConfidenceFiltering:
         # With a random model, most predictions should have confidence < 0.99
         assert report.filtered_confidence > 0
         assert report.selected <= 10
+
+
+class TestFromPlan:
+    """Tests for PrelabelRunner.from_plan (CLI YAML integration)."""
+
+    def test_from_plan_parses_livecell_yaml(self) -> None:
+        """from_plan produces a valid config from the livecell YAML shape."""
+        from lumen.annotation.prelabel import PrelabelRunner
+
+        plan = {
+            "pipeline": {
+                "source": {"type": "hyperdata", "dataset": "livecell"},
+                "model": {
+                    "encoder": "eupe-pretrained",
+                    "head": "upernet",
+                    "ckpt": "weights/livecell/best.pt",
+                },
+                "filter": {
+                    "confidence_gate": 0.7,
+                    "ood": {"method": "mahalanobis", "threshold": 0.9},
+                },
+                "sample": {"active": {"method": "entropy", "k": 200}},
+                "sink": {"type": "label_studio", "project": "LiveCELL pre-label v3"},
+            },
+        }
+        runner = PrelabelRunner.from_plan(plan)
+        cfg = runner.pipeline
+
+        assert cfg.model == "weights/livecell/best.pt"
+        assert cfg.encoder == "eupe-pretrained"
+        assert cfg.head == "upernet"
+        assert cfg.sampler.strategy == "entropy"
+        assert cfg.sampler.k == 200
+        assert cfg.ood.enabled is True
+        assert cfg.ood.method == "mahalanobis"
+        assert cfg.ood.threshold == 0.9
+        assert cfg.confidence.threshold == 0.7
+        assert cfg.sink.type == "labelstudio"
+        assert cfg.sink.ls_project_name == "LiveCELL pre-label v3"
+        assert cfg.source.type == "hyperdata"
+
+    def test_from_plan_defaults_for_minimal_yaml(self) -> None:
+        """from_plan fills sensible defaults when sections are missing."""
+        from lumen.annotation.prelabel import PrelabelRunner
+
+        plan = {"pipeline": {}}
+        runner = PrelabelRunner.from_plan(plan)
+        cfg = runner.pipeline
+
+        assert cfg.encoder == "eupe-pretrained"
+        assert cfg.sampler.strategy == "entropy"
+        assert cfg.sampler.k == 10
+        assert cfg.sink.type == "file"
+        assert cfg.ood.enabled is False
+
+    def test_from_plan_file_sink(self) -> None:
+        """from_plan maps unknown sink types to file sink."""
+        from lumen.annotation.prelabel import PrelabelRunner
+
+        plan = {
+            "pipeline": {
+                "sink": {"type": "file", "output_path": "out/tasks.json"},
+            },
+        }
+        runner = PrelabelRunner.from_plan(plan)
+        assert runner.pipeline.sink.type == "file"
+        assert runner.pipeline.sink.output_path == "out/tasks.json"
