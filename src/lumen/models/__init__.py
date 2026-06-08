@@ -37,6 +37,7 @@ from lumen.models.sam3 import (
 )
 from lumen.models.sam3_tracking import Sam3TrackingHead
 from lumen.models.segmenter_base import SegmenterBase, SegmenterProtocol
+from lumen.models.simple import SimplePatchEncoder
 from lumen.models.task_model import (
     LumenTaskModel,
     Trainability,
@@ -62,6 +63,7 @@ __all__ = [
     "Sam3ImageEncoder",
     "Sam3Segmenter",
     "Sam3TrackingHead",
+    "SimplePatchEncoder",
     "SegmentationHead",
     "SegmenterBase",
     "SegmenterProtocol",
