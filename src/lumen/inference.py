@@ -348,6 +348,106 @@ class MicroscopyInference:
 
         return results
 
+    def predict_with_quality(
+        self,
+        images: np.ndarray | torch.Tensor,
+        return_embeddings: bool = True,
+    ) -> tuple[InferenceResult, torch.Tensor | None]:
+        """Run inference and return raw logits, embeddings, and quality metrics.
+
+        Unlike :meth:`infer`, this method returns un-post-processed logits so
+        that downstream quality gates and samplers can operate on raw model
+        outputs.  The ``ood_score`` and ``confidence`` fields are stored in
+        ``result.metadata``.
+
+        Args:
+            images: Input images, ``(B, C, H, W)``.
+            return_embeddings: Whether to compute and return encoder
+                embeddings.
+
+        Returns:
+            ``(InferenceResult, embeddings)``.  ``embeddings`` is ``None``
+            when *return_embeddings* is ``False``.  ``result.predictions``
+            holds the raw logits as a ``torch.Tensor``.
+        """
+        import time
+
+        if self._model is None:
+            self.load_model()
+
+        if isinstance(images, np.ndarray):
+            images = torch.from_numpy(images).float()
+
+        if images.dim() == 2:
+            images = images.unsqueeze(0).unsqueeze(0)
+        elif images.dim() == 3:
+            images = images.unsqueeze(0)
+
+        if tuple(images.shape[-2:]) != self.config.image_size:
+            images = nn_functional.interpolate(
+                images,
+                size=self.config.image_size,
+                mode="bilinear",
+                align_corners=False,
+            )
+
+        images = images.to(self.device)
+        assert self._model is not None
+
+        start = time.time()
+        with torch.inference_mode():
+            tokens = self._model.encoder(images)
+            if self.config.task_type == "segmentation":
+                logits = self._model.head(tokens, image_size=images.shape[2:])
+            else:
+                logits = self._model.head(tokens)
+            embeddings = tokens if return_embeddings else None
+        latency_ms = (time.time() - start) * 1000
+
+        # Energy-based OOD score from embeddings
+        metadata: dict[str, Any] = {
+            "task_type": self.config.task_type,
+            "encoder": (
+                self._checkpoint_metadata.encoder_name
+                if self._checkpoint_metadata
+                else self.config.encoder_name
+            ),
+            "head": (
+                self._checkpoint_metadata.head_name
+                if self._checkpoint_metadata
+                else self.config.head_name
+            ),
+        }
+        if embeddings is not None:
+            flat = embeddings.view(embeddings.shape[0], -1)
+            ood_scores = -torch.logsumexp(flat, dim=-1)
+            metadata["ood_score"] = ood_scores.cpu().tolist()
+
+        # Confidence from logits
+        if isinstance(logits, (tuple, list)):
+            logits_tensor = cast(torch.Tensor, logits[0])
+        else:
+            logits_tensor = cast(torch.Tensor, logits)
+
+        if logits_tensor.dim() == 4:
+            probs = nn_functional.softmax(logits_tensor, dim=1)
+            conf, _ = probs.max(dim=1)
+            conf = conf.mean(dim=(1, 2))
+        else:
+            probs = nn_functional.softmax(logits_tensor, dim=-1)
+            conf, _ = probs.max(dim=-1)
+        metadata["confidence"] = conf.cpu().tolist()
+
+        result = InferenceResult(
+            predictions=logits_tensor.cpu(),
+            confidence=conf.cpu(),
+            latency_ms=latency_ms,
+            batch_size=images.shape[0],
+            metadata=metadata,
+        )
+
+        return result, embeddings.cpu() if embeddings is not None else None
+
     def _load_image_batch(
         self, paths: list[str | Path]
     ) -> torch.Tensor:

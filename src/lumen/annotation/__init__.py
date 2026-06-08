@@ -9,11 +9,19 @@ from lumen.annotation.label_studio import (
     prediction_to_label_studio_result,
     write_label_studio_tasks,
 )
+from lumen.annotation.prelabel import (
+    PrelabelPipelineConfig,
+    PrelabelReport,
+    PrelabelRunner,
+)
 
 __all__ = [
     "LabelStudioClient",
     "LabelStudioConfig",
     "LabellingTaskStore",
+    "PrelabelPipelineConfig",
+    "PrelabelReport",
+    "PrelabelRunner",
     "build_label_config",
     "export_corrected_labels",
     "prediction_to_label_studio_result",
