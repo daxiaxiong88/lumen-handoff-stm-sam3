@@ -1,0 +1,17 @@
+pipeline:
+  source:
+    type: label_studio
+    project: "LiveCELL pre-label v3"
+    status: accepted
+  trainer:
+    type: incremental
+    base_ckpt: eupe-livecell@latest
+    replay_buffer: 0.2
+    epochs: 20
+  eval:
+    dataset: livecell_holdout
+    metrics: [miou, dice_per_class]
+  promote:
+    "on":
+      miou_delta: ">=+0.01"
+    alias: eupe-livecell@latest
