@@ -6,11 +6,13 @@
 
 ```
 lumen/
-├── data/           # 数据加载、预处理、增强
-├── models/         # EUPE 编码器、下游任务头
-├── training/       # 训练循环、自监督策略、评估
-├── utils/          # 工具函数
-└── configs/        # YAML 配置文件
+├── annotation/    # Label Studio 集成、预标注、审核循环
+├── benchmark/     # 基准测试与指标计算
+├── cli/           # Typer CLI 命令
+├── data/          # 数据加载、预处理、增强
+├── models/        # EUPE 编码器、下游任务头
+├── training/      # 训练循环、自监督策略、评估
+└── utils/         # 工具函数、配置、模型注册表
 ```
 
 ## 核心特性
@@ -19,6 +21,7 @@ lumen/
 - **自监督预训练**: MAE + 对比学习混合策略
 - **Supervision 集成**: 与 supervision 库无缝衔接的后处理工具链
 - **科学图像专用**: 针对材料科学、半导体、纳米技术优化的图像分析
+- **Agentic 标注循环**: 预标注 → 人工审核 → 增量重训练 → 质量门控自动推广
 
 ## 快速开始
 
@@ -27,6 +30,48 @@ source .venv/bin/activate
 uv sync
 uv pip install -e ".[dev]"
 ```
+
+## 标注流程（Label Studio 人机协作）
+
+Lumen 提供 end-to-end 的标注闭环：模型预测 → 推送预标注到 Label Studio → 人工校正 → 增量重训练 → 质量门控推广。
+
+### 1. 启动 Label Studio
+
+```bash
+pip install lumen[labelstudio]
+docker compose up -d
+# 打开 http://localhost:8080 创建账户并获取 API token
+```
+
+### 2. 运行预标注管道
+
+```bash
+lumen prelabel run configs/pipelines/livecell_prelabel.yaml
+```
+
+Dry-run 验证 YAML：
+
+```bash
+lumen prelabel run configs/pipelines/livecell_prelabel.yaml --dry-run
+```
+
+### 3. 人工审核
+
+在 Label Studio UI 中审核预标注，校正并标记为 accepted。
+
+### 4. 重训练
+
+```bash
+lumen retrain run configs/pipelines/livecell_retrain.yaml
+```
+
+### 5. 查看模型注册表
+
+```bash
+lumen model list
+```
+
+详细文档见 [docs/labelling.md](docs/labelling.md)，管道配置见 [docs/pipelines.md](docs/pipelines.md)。
 
 ## 模型权重
 
@@ -80,4 +125,7 @@ uv run mypy src
 ```
 
 ## 文档
-见 docs/dev.md
+
+- [docs/labelling.md](docs/labelling.md) — 标注流程完整文档
+- [docs/pipelines.md](docs/pipelines.md) — 管道 YAML 配置参考
+- [docs/dev.md](docs/dev.md) — 开发指南
