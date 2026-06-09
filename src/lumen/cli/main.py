@@ -11,7 +11,6 @@ from typing import Annotated, Literal
 import numpy as np
 import typer
 from PIL import Image
-from pydantic import ValidationError
 
 import lumen.models  # noqa: F401 - populate model registries on import
 from lumen.cli.model_registry import (
@@ -130,17 +129,18 @@ def prelabel_run(
 ) -> None:
     """Run or dry-run a pre-labeling pipeline."""
     _ = (config, device, output_dir)
-    plan = _load_pipeline_plan(pipeline_yaml)
+    plan = pipeline_plan(pipeline_yaml)
     if dry_run:
         typer.echo(json.dumps(plan, indent=2, sort_keys=True))
         return
     try:
-        from lumen.prelabel import PrelabelRunner  # type: ignore[import-not-found]
+        from lumen.annotation.prelabel import PrelabelRunner
     except ImportError as exc:
         raise typer.ClickException(
             "PrelabelRunner is not available yet. Re-run with --dry-run to validate YAML."
         ) from exc
-    PrelabelRunner.from_plan(plan).run()  # type: ignore[name-defined]
+    runner = PrelabelRunner.from_plan(plan)
+    runner.run()
 
 
 @retrain_app.command("run")
@@ -153,7 +153,7 @@ def retrain_run(
 ) -> None:
     """Run or dry-run a review-loop retraining pipeline."""
     _ = (config, device, output_dir)
-    plan = _load_pipeline_plan(pipeline_yaml)
+    plan = pipeline_plan(pipeline_yaml)
     if dry_run:
         typer.echo(json.dumps(plan, indent=2, sort_keys=True))
         return
@@ -257,13 +257,6 @@ def model_promote(name: Annotated[str, typer.Argument(help="Alias to mark active
 def download_models() -> None:
     """Download configured model assets."""
     download_models_main()
-
-
-def _load_pipeline_plan(pipeline_yaml: Path) -> dict[str, object]:
-    try:
-        return pipeline_plan(pipeline_yaml)
-    except (ValueError, ValidationError) as exc:
-        raise typer.BadParameter(str(exc), param_hint="pipeline_yaml") from exc
 
 
 def _load_lumen_config(config: Path | None) -> LumenConfig:
