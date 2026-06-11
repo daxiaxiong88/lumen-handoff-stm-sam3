@@ -6,7 +6,6 @@ import json
 from pathlib import Path
 
 import numpy as np
-import pytest
 import torch
 import torch.nn as nn
 from PIL import Image
@@ -16,6 +15,7 @@ from lumen.models.registry import register_encoder
 # ---------------------------------------------------------------------------
 # Tiny test encoder — registered once at import time
 # ---------------------------------------------------------------------------
+
 
 @register_encoder("_test_prelabel")
 class _TestEncoder(nn.Module):
@@ -33,7 +33,9 @@ class _TestEncoder(nn.Module):
         self.patch_size = patch_size
         self.in_channels = in_channels
         self.embed_dim = embed_dim
-        self.proj = nn.Conv2d(in_channels, embed_dim, kernel_size=patch_size, stride=patch_size)
+        self.proj = nn.Conv2d(
+            in_channels, embed_dim, kernel_size=patch_size, stride=patch_size
+        )
         self.norm = nn.LayerNorm(embed_dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -44,6 +46,7 @@ class _TestEncoder(nn.Module):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _create_synthetic_images(image_dir: Path, count: int = 20, size: int = 32) -> Path:
     """Write *count* synthetic PNG images into *image_dir* and return it."""
@@ -95,9 +98,25 @@ def _make_config(
     )
 
 
+def test_segmentation_logits_convert_to_polygon_prediction() -> None:
+    """Segmentation logits produce LS-compatible polygon preannotations."""
+    from lumen.annotation.prelabel import _logits_to_predictions
+
+    logits = torch.zeros(2, 16, 16)
+    logits[1, 4:12, 5:13] = 5.0
+
+    preds = _logits_to_predictions(logits, "segmentation", ["background", "cell"])
+
+    assert len(preds) == 1
+    assert preds[0].class_name == "cell"
+    assert preds[0].points is not None
+    assert len(preds[0].points) == 4
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 class TestPrelabelRunner:
     """Acceptance-level tests for the PrelabelRunner pipeline."""
@@ -108,7 +127,9 @@ class TestPrelabelRunner:
 
         image_dir = _create_synthetic_images(tmp_path / "images", count=20)
         output_path = tmp_path / "tasks.json"
-        cfg = _make_config(image_dir, output_path, sampler_k=5, sampler_strategy="entropy")
+        cfg = _make_config(
+            image_dir, output_path, sampler_k=5, sampler_strategy="entropy"
+        )
 
         runner = PrelabelRunner(cfg)
         report = runner.run()
@@ -156,7 +177,10 @@ class TestPrelabelRunner:
         image_dir = _create_synthetic_images(tmp_path / "images", count=12)
         output_path = tmp_path / "tasks.json"
         cfg = _make_config(
-            image_dir, output_path, sampler_k=4, sampler_strategy="margin",
+            image_dir,
+            output_path,
+            sampler_k=4,
+            sampler_strategy="margin",
         )
 
         runner = PrelabelRunner(cfg)
@@ -173,7 +197,10 @@ class TestPrelabelRunner:
         image_dir = _create_synthetic_images(tmp_path / "images", count=15)
         output_path = tmp_path / "tasks.json"
         cfg = _make_config(
-            image_dir, output_path, sampler_k=6, sampler_strategy="diversity",
+            image_dir,
+            output_path,
+            sampler_k=6,
+            sampler_strategy="diversity",
         )
 
         runner = PrelabelRunner(cfg)
@@ -189,7 +216,10 @@ class TestPrelabelRunner:
         image_dir = _create_synthetic_images(tmp_path / "images", count=15)
         output_path = tmp_path / "tasks.json"
         cfg = _make_config(
-            image_dir, output_path, sampler_k=5, sampler_strategy="hybrid",
+            image_dir,
+            output_path,
+            sampler_k=5,
+            sampler_strategy="hybrid",
         )
 
         runner = PrelabelRunner(cfg)
@@ -336,14 +366,16 @@ class TestPrelabelSampler:
         sampler = PrelabelSampler(SamplerConfig(strategy="entropy", k=3))
 
         # Create logits where some are very confident, some uncertain
-        logits = torch.tensor([
-            [10.0, 0.0],   # very confident → low entropy
-            [0.1, 0.1],    # very uncertain → high entropy
-            [5.0, 0.0],    # somewhat confident
-            [0.2, 0.15],   # uncertain → high entropy
-            [8.0, 0.0],    # confident
-            [0.3, 0.25],   # most uncertain → highest entropy
-        ])
+        logits = torch.tensor(
+            [
+                [10.0, 0.0],  # very confident → low entropy
+                [0.1, 0.1],  # very uncertain → high entropy
+                [5.0, 0.0],  # somewhat confident
+                [0.2, 0.15],  # uncertain → high entropy
+                [8.0, 0.0],  # confident
+                [0.3, 0.25],  # most uncertain → highest entropy
+            ]
+        )
         indices = sampler.select(logits, None, 3)
         assert 1 in indices  # most uncertain
         assert 3 in indices
@@ -355,12 +387,14 @@ class TestPrelabelSampler:
 
         sampler = PrelabelSampler(SamplerConfig(strategy="margin", k=2))
 
-        logits = torch.tensor([
-            [10.0, 0.0, 0.0],   # large margin
-            [1.0, 0.99, 0.0],   # tiny margin → selected
-            [0.5, 0.5, 0.0],    # zero margin → selected
-            [5.0, 1.0, 0.0],    # medium margin
-        ])
+        logits = torch.tensor(
+            [
+                [10.0, 0.0, 0.0],  # large margin
+                [1.0, 0.99, 0.0],  # tiny margin → selected
+                [0.5, 0.5, 0.0],  # zero margin → selected
+                [5.0, 1.0, 0.0],  # medium margin
+            ]
+        )
         indices = sampler.select(logits, None, 2)
         assert 1 in indices
         assert 2 in indices
@@ -437,6 +471,7 @@ class TestFromPlan:
         assert cfg.sink.type == "labelstudio"
         assert cfg.sink.ls_project_name == "LiveCELL pre-label v3"
         assert cfg.source.type == "hyperdata"
+        assert cfg.source.dataset == "livecell"
 
     def test_from_plan_defaults_for_minimal_yaml(self) -> None:
         """from_plan fills sensible defaults when sections are missing."""
@@ -464,3 +499,25 @@ class TestFromPlan:
         runner = PrelabelRunner.from_plan(plan)
         assert runner.pipeline.sink.type == "file"
         assert runner.pipeline.sink.output_path == "out/tasks.json"
+
+    def test_from_plan_preserves_source_fields(self) -> None:
+        """from_plan keeps source fields needed by real dataset adapters."""
+        from lumen.annotation.prelabel import PrelabelRunner
+
+        plan = {
+            "pipeline": {
+                "source": {
+                    "type": "hyperdata",
+                    "dataset": "livecell",
+                    "split": "unlabeled",
+                    "pattern": "*.png",
+                    "batch_size": 4,
+                },
+            },
+        }
+        cfg = PrelabelRunner.from_plan(plan).pipeline.source
+        assert cfg.type == "hyperdata"
+        assert cfg.dataset == "livecell"
+        assert cfg.split == "unlabeled"
+        assert cfg.pattern == "*.png"
+        assert cfg.batch_size == 4
