@@ -54,8 +54,8 @@ pipeline:
 
     assert result.exit_code == 0
     plan = json.loads(result.output)
-    assert plan["pipeline"]["pipeline"]["source"]["dataset"] == "override"
-    assert plan["pipeline"]["pipeline"]["model"]["encoder"] == "eupe-pretrained"
+    assert plan["pipeline"]["source"]["dataset"] == "override"
+    assert plan["pipeline"]["model"]["encoder"] == "eupe-pretrained"
 
 
 def test_model_registry_add_list_promote(tmp_path: Path, monkeypatch) -> None:

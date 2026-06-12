@@ -28,8 +28,7 @@ from lumen.annotation.label_studio import (
     write_label_studio_tasks,
 )
 from lumen.data.dataset import ScientificImageDataset
-from lumen.inference import InferenceConfig, InferenceResult, MicroscopyInference
-from lumen.utils.quality_gate import ConfidenceGate, OODDetector
+from lumen.inference import InferenceConfig, MicroscopyInference
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +36,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class SamplerConfig:
@@ -82,6 +82,8 @@ class SourceConfig:
 
     type: Literal["local", "hyperdata"] = "local"
     root: str = ""
+    dataset: str | None = None
+    split: str | None = None
     pattern: str = "**/*"
     batch_size: int = 8
 
@@ -114,9 +116,7 @@ class PrelabelPipelineConfig:
     task_type: str = "segmentation"
     device: str = "cpu"
     image_size: tuple[int, int] = (224, 224)
-    class_names: list[str] = field(
-        default_factory=lambda: ["foreground", "background"]
-    )
+    class_names: list[str] = field(default_factory=lambda: ["foreground", "background"])
     num_classes: int = 2
 
     sampler: SamplerConfig = field(default_factory=SamplerConfig)
@@ -147,6 +147,7 @@ class PrelabelReport:
 # Prediction wrapper — duck-typed for label_studio.py conversion
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class PrelabelPrediction:
     """Lightweight prediction object consumed by ``write_label_studio_tasks``."""
@@ -176,8 +177,79 @@ def _logits_to_predictions(
             for idx, prob in zip(top_idx.unbind(), top_prob.unbind())
         ]
 
-    # For segmentation / detection, emit one prediction per class with
-    # mean confidence as a summary preannotation.
+    if task_type == "segmentation" and logits.dim() == 3:
+        probs = torch.softmax(logits, dim=0)
+        pred_mask = probs.argmax(dim=0)
+        height, width = int(pred_mask.shape[0]), int(pred_mask.shape[1])
+        preds: list[PrelabelPrediction] = []
+        for ci in range(1, min(probs.shape[0], len(class_names))):
+            mask = pred_mask == ci
+            if not mask.any():
+                continue
+            ys, xs = torch.where(mask)
+            x0, x1 = float(xs.min()), float(xs.max())
+            y0, y1 = float(ys.min()), float(ys.max())
+            if x1 <= x0 or y1 <= y0:
+                continue
+            preds.append(
+                PrelabelPrediction(
+                    class_name=class_names[ci],
+                    confidence=float(probs[ci][mask].mean()),
+                    points=[(x0, y0), (x1, y0), (x1, y1), (x0, y1)],
+                )
+            )
+        if preds:
+            return preds
+        if width > 1 and height > 1 and len(class_names) > 1:
+            return [
+                PrelabelPrediction(
+                    class_name=class_names[1],
+                    confidence=float(probs[1].mean()) if probs.shape[0] > 1 else 0.0,
+                    points=[
+                        (0.0, 0.0),
+                        (float(width - 1), 0.0),
+                        (float(width - 1), float(height - 1)),
+                        (0.0, float(height - 1)),
+                    ],
+                )
+            ]
+        return []
+
+    if task_type == "detection" and logits.dim() == 3:
+        probs = torch.softmax(logits, dim=0)
+        pred_mask = probs.argmax(dim=0)
+        height, width = int(pred_mask.shape[0]), int(pred_mask.shape[1])
+        preds = []
+        for ci in range(1, min(probs.shape[0], len(class_names))):
+            mask = pred_mask == ci
+            if not mask.any():
+                continue
+            ys, xs = torch.where(mask)
+            x0, x1 = float(xs.min()), float(xs.max())
+            y0, y1 = float(ys.min()), float(ys.max())
+            if x1 <= x0 or y1 <= y0:
+                continue
+            preds.append(
+                PrelabelPrediction(
+                    class_name=class_names[ci],
+                    confidence=float(probs[ci][mask].mean()),
+                    xyxy=(x0, y0, x1, y1),
+                )
+            )
+        if preds:
+            return preds
+        if width > 1 and height > 1 and len(class_names) > 1:
+            return [
+                PrelabelPrediction(
+                    class_name=class_names[1],
+                    confidence=float(probs[1].mean()) if probs.shape[0] > 1 else 0.0,
+                    xyxy=(0.0, 0.0, float(width - 1), float(height - 1)),
+                )
+            ]
+        return []
+
+    # For batched segmentation / detection logits, emit one prediction per class
+    # with mean confidence as a summary preannotation.
     if logits.dim() == 4:
         probs = torch.softmax(logits, dim=1)
         per_class_conf = probs.mean(dim=(2, 3))
@@ -188,10 +260,7 @@ def _logits_to_predictions(
     preds: list[PrelabelPrediction] = []
     for ci in range(per_class_conf.shape[-1]):
         conf = per_class_conf[..., ci]
-        if conf.dim() == 0:
-            conf_val = conf.item()
-        else:
-            conf_val = float(conf.mean())
+        conf_val = conf.item() if conf.dim() == 0 else float(conf.mean())
         if conf_val > 0.1:
             preds.append(
                 PrelabelPrediction(
@@ -205,6 +274,7 @@ def _logits_to_predictions(
 # ---------------------------------------------------------------------------
 # Sources
 # ---------------------------------------------------------------------------
+
 
 class PrelabelSource(ABC):
     """Protocol for iterating image batches."""
@@ -242,19 +312,24 @@ class LocalGlobSource(PrelabelSource):
             shuffle=False,
             num_workers=0,
         )
-        for batch in loader:
-            yield batch
+        yield from loader
 
 
 class HyperDataSource(PrelabelSource):
-    """Stub for HyperData integration — delegates to :class:`LocalGlobSource`."""
+    """Resolve named HyperData-style datasets into a local image source.
+
+    The LiveCELL capstone pipeline uses ``dataset: livecell`` as the portable
+    name and resolves the concrete image root from the YAML ``root`` field,
+    ``LUMEN_LIVECELL_IMAGES``, or the documented local dataset path.
+    """
 
     def __init__(
         self,
         config: SourceConfig,
         image_size: tuple[int, int] = (224, 224),
     ) -> None:
-        self._local = LocalGlobSource(config, image_size)
+        self.config = config
+        self._local = LocalGlobSource(_resolve_hyperdata_source(config), image_size)
 
     def all_paths(self) -> list[Path]:
         return self._local.all_paths()
@@ -263,9 +338,40 @@ class HyperDataSource(PrelabelSource):
         return self._local.iter_batches()
 
 
+def _resolve_hyperdata_source(config: SourceConfig) -> SourceConfig:
+    if config.root:
+        return config
+    if config.dataset == "livecell":
+        import os
+
+        root = os.environ.get(
+            "LUMEN_LIVECELL_IMAGES",
+            "data/livecell/LIVECell_dataset_2021/images/livecell_train_val_images",
+        )
+        root_path = Path(root)
+        if not root_path.exists():
+            raise FileNotFoundError(
+                "LiveCELL images not found. Set LUMEN_LIVECELL_IMAGES or add the "
+                f"dataset at {root_path}."
+            )
+        return SourceConfig(
+            type=config.type,
+            root=str(root_path),
+            dataset=config.dataset,
+            split=config.split,
+            pattern=config.pattern,
+            batch_size=config.batch_size,
+        )
+    raise ValueError(
+        "HyperDataSource requires source.root or a supported source.dataset "
+        f"(got {config.dataset!r})."
+    )
+
+
 # ---------------------------------------------------------------------------
 # Sinks
 # ---------------------------------------------------------------------------
+
 
 class PrelabelSink(ABC):
     """Protocol for pushing selected images with predictions."""
@@ -344,6 +450,7 @@ class LabelStudioSink(PrelabelSink):
 # ---------------------------------------------------------------------------
 # Sampler — operates on pre-computed predictions & embeddings
 # ---------------------------------------------------------------------------
+
 
 class PrelabelSampler:
     """Select images for annotation using pre-computed model outputs.
@@ -483,6 +590,7 @@ def _diversity_proxy(embeddings: torch.Tensor) -> torch.Tensor:
 # Runner
 # ---------------------------------------------------------------------------
 
+
 class PrelabelRunner:
     """End-to-end predict → filter → sample → push pipeline.
 
@@ -540,6 +648,9 @@ class PrelabelRunner:
             source=SourceConfig(
                 type=src.get("type", "local"),
                 root=src.get("root", ""),
+                dataset=src.get("dataset"),
+                split=src.get("split"),
+                pattern=src.get("pattern", "**/*"),
                 batch_size=src.get("batch_size", 8),
             ),
             sampler=SamplerConfig(
@@ -579,7 +690,6 @@ class PrelabelRunner:
         inference.load_model()
 
         # Build components
-        confidence_gate = ConfidenceGate(threshold=cfg.confidence.threshold)
         sampler = PrelabelSampler(cfg.sampler)
         source = self._build_source(cfg)
         sink = self._build_sink(cfg)
@@ -601,7 +711,8 @@ class PrelabelRunner:
             total_images += len(paths)
 
             result, embeddings = inference.predict_with_quality(
-                images, return_embeddings=True,
+                images,
+                return_embeddings=True,
             )
             raw_logits = result.predictions  # torch.Tensor (B, ...)
             ood_scores = result.metadata.get("ood_score", [])
@@ -645,9 +756,7 @@ class PrelabelRunner:
 
         # Stack for sampling
         all_logits = torch.stack(cand_logits)
-        all_embeddings = (
-            torch.stack(cand_embeddings) if cand_embeddings else None
-        )
+        all_embeddings = torch.stack(cand_embeddings) if cand_embeddings else None
 
         # Sample
         k = min(cfg.sampler.k, total_candidates)
@@ -661,7 +770,9 @@ class PrelabelRunner:
             path = cand_paths[idx]
             sel_paths.append(path)
             preds = _logits_to_predictions(
-                all_logits[idx], cfg.task_type, cfg.class_names,
+                all_logits[idx],
+                cfg.task_type,
+                cfg.class_names,
             )
             predictions_by_image[path] = preds
 
@@ -672,9 +783,11 @@ class PrelabelRunner:
         avg_conf = float(np.mean(cand_confidences)) if cand_confidences else 0.0
 
         logger.info(
-            "PrelabelRunner finished: %d images, %d candidates, "
-            "%d selected, %d pushed",
-            total_images, total_candidates, selected, pushed,
+            "PrelabelRunner finished: %d images, %d candidates, %d selected, %d pushed",
+            total_images,
+            total_candidates,
+            selected,
+            pushed,
         )
 
         return PrelabelReport(

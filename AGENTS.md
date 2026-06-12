@@ -36,10 +36,27 @@ No Makefile, no CI configs observed. Build system is `hatchling`.
 
 ```
 src/lumen/
+├── annotation/       # Label Studio integration, prelabel pipeline, review loop, task store
+│   ├── label_studio.py  # LabelStudioConfig, write_label_studio_tasks, export_corrected_labels
+│   ├── ls_client.py     # LabelStudioClient — REST API wrapper for LS
+│   ├── prelabel.py      # PrelabelRunner — predict → filter → sample → push pipeline
+│   ├── review_loop.py   # ReviewLoop — pull corrections → export labels → split
+│   └── store.py         # LabellingTaskStore — SQLite-backed task lifecycle tracking
+├── benchmark/        # Dataset benchmarks, metrics, visualization
+│   ├── dataset.py    # Benchmark dataset loading
+│   ├── metrics.py    # compute_metrics, summarize_results (mIoU, Dice, pixel accuracy)
+│   ├── runner.py     # BenchmarkRunner
+│   └── visualize.py  # Benchmark visualization
+├── cli/              # Typer-powered CLI
+│   ├── main.py       # Commands: predict, prelabel run, retrain run, model list/promote
+│   ├── pipeline.py   # PipelineDocument, pipeline_plan — YAML loading + env overrides
+│   └── model_registry.py # CLI-level model alias management (add, promote)
 ├── models/           # Encoders + heads + few-shot matcher
 │   ├── eupe.py       # EUPEEncoder wrapper around vendor DinoVisionTransformer
 │   ├── dinov3.py     # DINOv3Encoder adapter for transformers checkpoints
 │   ├── heads.py      # SegmentationHead, DetectionHead, KeypointHead
+│   ├── registry.py   # build_encoder, build_head — encoder/head factories
+│   ├── task_model.py # LumenTaskModel — encoder + head wrapper
 │   ├── feature_viz.py # PCA-based token visualization
 │   └── few_shot.py   # FewShotFeatureMatcher for sim-to-real prototype matching
 ├── training/         # Trainers + training utilities
@@ -50,16 +67,27 @@ src/lumen/
 │   ├── weak_supervision.py # PseudoLabeler, MeanTeacher, CoTeaching, WeakSupervisionTrainer
 │   ├── active_learning.py  # UncertaintySampler, DiversitySampler, BatchActiveLearner
 │   ├── incremental.py      # ReplayBuffer, EWCRegularizer, LwFRegularizer, IncrementalTrainer
+│   ├── stages.py     # Training stage definitions
+│   ├── multihead.py  # Multi-head training support
+│   ├── losses.py     # Custom loss functions
 │   ├── eval.py       # mean_iou, dice, mAP, RMSE, etc.
 │   └── workflow.py   # Epoch loops: train_self_supervised_epoch, train_fine_tune_epoch
 ├── data/             # Datasets + augmentations + supervision bridge
 │   ├── dataset.py    # ScientificImageDataset, STEMDataset, FIBDataset, SegmentationPairDataset
 │   ├── augment.py    # YOLO-style photometric/geometric transforms (torch-only, no albumentations)
-│   └── supervision_bridge.py # Convert outputs to supervision.Detections / KeyPoints
+│   ├── supervision_bridge.py # Convert outputs to supervision.Detections / KeyPoints
+│   ├── roboflow_inference.py # RoboflowInferenceClient, RoboflowInferenceConfig
+│   └── hyperdata/    # HyperData dataset integration
+├── inference.py      # MicroscopyInference, InferenceConfig, InferenceResult, InferenceServer
+├── retrain.py        # IncrementalRetrainer, ModelRegistry, evaluate_gate, RetrainReport
+├── model_switcher.py # Model switching utilities
 └── utils/
     ├── config.py     # LumenConfig dataclass hierarchy, YAML/env loading
     ├── logging.py    # ExperimentLogger (TensorBoard), TrainingHistory, checkpoint utils
-    └── quality_gate.py # ConfidenceGate, OODDetector, QualityScorer, QualityGate
+    ├── quality_gate.py # ConfidenceGate, OODDetector, QualityScorer, QualityGate
+    ├── checkpoint_manager.py # CheckpointManager, CheckpointMetadata
+    ├── benchmark.py  # Benchmark utilities
+    └── fewshot.py    # Few-shot evaluation utilities
 ```
 
 ## Vendor Code Dependency (Critical)
@@ -229,6 +257,18 @@ The `EUPESectionConfig` dataclass mirrors YAML names; `ModelConfig` mirrors Pyth
 ## Public API Entry Points
 
 ```python
+# Annotation / Labelling
+from lumen.annotation import LabelStudioClient, LabelStudioConfig, LabellingTaskStore
+from lumen.annotation import PrelabelRunner, PrelabelPipelineConfig, PrelabelReport
+from lumen.annotation import write_label_studio_tasks, export_corrected_labels
+from lumen.annotation.review_loop import ReviewLoop, ReviewLoopConfig, CorrectedDataset
+
+# Retrain / Model Registry
+from lumen.retrain import IncrementalRetrainer, ModelRegistry, RetrainConfig, RetrainReport, evaluate_gate
+
+# Inference
+from lumen.inference import MicroscopyInference, InferenceConfig, InferenceResult, InferenceServer
+
 # Models
 from lumen.models import EUPEEncoder, DINOv3Encoder, SegmentationHead, DetectionHead, KeypointHead, FewShotFeatureMatcher
 
@@ -243,6 +283,9 @@ from lumen.training.workflow import train_self_supervised_epoch, train_fine_tune
 from lumen.data import ScientificImageDataset, STEMDataset, FIBDataset, SegmentationPairDataset
 from lumen.data import SupervisionBridge, prepare_image_for_supervision
 from lumen.data import Compose, default_seg_aug
+
+# Benchmark
+from lumen.benchmark.metrics import compute_metrics, summarize_results
 
 # Utils
 from lumen.utils.config import LumenConfig, load_config, load_config_from_env

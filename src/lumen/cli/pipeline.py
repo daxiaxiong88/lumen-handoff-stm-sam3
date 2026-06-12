@@ -49,7 +49,7 @@ def pipeline_plan(path: str | Path) -> dict[str, Any]:
     doc = load_pipeline_document(path)
     return {
         "pipeline_path": str(Path(path)),
-        "pipeline": doc.model_dump(mode="json"),
+        "pipeline": doc.pipeline.model_dump(mode="json"),
     }
 
 
