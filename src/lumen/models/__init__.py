@@ -45,6 +45,21 @@ from lumen.models.task_model import (
     set_module_trainable,
     split_encoder_head_parameters,
 )
+from lumen.models.vision_banana import (
+    DEFAULT_MODEL_ID as VISION_BANANA_MODEL_ID,
+)
+from lumen.models.vision_banana import (
+    VisionBananaSegmenter,
+    build_depth_prompt,
+    build_normal_prompt,
+    build_segmentation_prompt,
+    decode_depth,
+    decode_normal,
+    decode_segmentation,
+    encode_depth,
+    encode_normal,
+    load_vision_banana_segmenter,
+)
 
 __all__ = [
     "DINOv3Encoder",
@@ -86,4 +101,15 @@ __all__ = [
     "set_module_trainable",
     "split_encoder_head_parameters",
     "tokens_to_pca_rgb",
+    "VisionBananaSegmenter",
+    "VISION_BANANA_MODEL_ID",
+    "build_depth_prompt",
+    "build_normal_prompt",
+    "build_segmentation_prompt",
+    "decode_depth",
+    "decode_normal",
+    "decode_segmentation",
+    "encode_depth",
+    "encode_normal",
+    "load_vision_banana_segmenter",
 ]

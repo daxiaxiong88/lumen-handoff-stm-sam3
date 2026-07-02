@@ -26,6 +26,7 @@ dependencies = [
     "supervision>=0.28.0",
     "minio>=7.2.20",
     "sqlalchemy>=2.0.49",
+    "xformers>=0.0.32.post2",
 ]
 
 [project.scripts]
@@ -60,6 +61,16 @@ transformers = [
 ]
 labelstudio = [
     "label-studio-sdk>=1.0",
+]
+vision_banana = [
+    # FLUX.2-klein-4B needs Flux2KleinPipeline; install the git build:
+    #   pip install git+https://github.com/huggingface/diffusers.git
+    "diffusers>=0.35",
+    "transformers>=4.30",
+    "accelerate>=0.30",
+    "peft>=0.10",
+    "safetensors>=0.4",
+    "sentencepiece>=0.1.99",
 ]
 
 [build-system]
@@ -110,6 +121,9 @@ module = [
     "tensorboard.*",
     "matplotlib.*",
     "transformers.*",
+    "diffusers.*",
+    "huggingface_hub.*",
+    "peft.*",
     "label_studio_sdk.*",
 ]
 ignore_missing_imports = true
