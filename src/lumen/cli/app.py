@@ -78,6 +78,10 @@ def predict(
     config: ConfigOption = None,
     device: DeviceOption = None,
     output_dir: OutputDirOption = Path("outputs/predictions"),
+    model: Annotated[
+        str | None,
+        typer.Option("--model", help="Zoo model id (see `lumen model list`). Routes through load_predictor."),
+    ] = None,
     checkpoint: Annotated[
         Path | None,
         typer.Option("--checkpoint", exists=True, readable=True, help="Model checkpoint."),
@@ -93,12 +97,23 @@ def predict(
         typer.Option("--format", help="Prediction output format."),
     ] = OutputFormat.png,
 ) -> None:
-    """Run microscopy inference once for one image or a glob of images."""
+    """Run inference once for one image or a glob of images.
+
+    With ``--model`` the run goes through the unified zoo predictor
+    (:func:`lumen.models.load_predictor`), so any registered family works and
+    every task's output is written uniformly. Without it, the legacy
+    encoder+head path is used.
+    """
     cfg = _load_lumen_config(config)
     paths = _resolve_image_paths(image_or_glob)
     if not paths:
         raise typer.BadParameter(f"No images matched: {image_or_glob}")
     output_dir.mkdir(parents=True, exist_ok=True)
+    device_str = device.value if device is not None else _resolve_device(cfg.device)
+
+    if model is not None:
+        _predict_with_zoo(model, paths, output_dir, device_str, checkpoint, output_format.value)
+        return
 
     inference = MicroscopyInference(
         InferenceConfig(
@@ -106,7 +121,7 @@ def predict(
             encoder_name=encoder or cfg.get("pipeline.model.encoder") or "simple",
             head_name=head or cfg.downstream.segmentation.decoder,
             task_type=(task.value if task is not None else "segmentation"),
-            device=(device.value if device is not None else _resolve_device(cfg.device)),
+            device=device_str,
             image_size=(int(cfg.data.image_size[0]), int(cfg.data.image_size[1])),
             encoder_kwargs=_encoder_kwargs(cfg),
             num_classes=cfg.downstream.segmentation.num_classes,
@@ -370,6 +385,115 @@ def _write_prediction(
         arr = np.squeeze(arr)
     out = output_dir / f"{stem}_mask.png"
     Image.fromarray(arr.astype(np.uint8), mode="L").save(out)
+    return out
+
+
+def _predict_with_zoo(
+    model_id: str,
+    paths: list[Path],
+    output_dir: Path,
+    device: str,
+    checkpoint: Path | None,
+    output_format: Literal["png", "json"],
+) -> None:
+    """Run prediction through the unified zoo predictor for every path."""
+    from lumen.models import load_predictor
+
+    predictor = load_predictor(
+        model_id,
+        checkpoint=(str(checkpoint) if checkpoint is not None else None),
+        device=device,
+    )
+    written: list[str] = []
+    for path in paths:
+        arr, _ = load_image_array(path)
+        result = predictor.predict(arr)
+        written.append(str(_write_prediction_result(path, result, output_dir, output_format)))
+    typer.echo(
+        json.dumps(
+            {
+                "model": model_id,
+                "task": str(predictor.task),
+                "images": [str(path) for path in paths],
+                "outputs": written,
+            },
+            indent=2,
+        )
+    )
+
+
+def _to_uint8_gray(arr: object) -> np.ndarray:
+    a = np.asarray(arr, dtype=np.float32)
+    lo, hi = float(a.min()), float(a.max())
+    if hi - lo < 1e-8:
+        return np.zeros(a.shape, dtype=np.uint8)
+    return ((a - lo) / (hi - lo) * 255.0).astype(np.uint8)
+
+
+def _detections_to_jsonable(det: Any) -> dict[str, Any]:
+    out: dict[str, Any] = {
+        "xyxy": det.xyxy.tolist() if det.xyxy is not None else [],
+    }
+    if det.class_id is not None:
+        out["class_id"] = det.class_id.tolist()
+    if det.confidence is not None:
+        out["confidence"] = det.confidence.tolist()
+    names = det.data.get("class_name") if getattr(det, "data", None) else None
+    if names is not None:
+        out["class_name"] = [str(n) for n in names]
+    return out
+
+
+def _result_to_jsonable(result: Any, image_path: Path) -> dict[str, Any]:
+    data: dict[str, Any] = {
+        "image": str(image_path),
+        "task": str(result.task),
+        "model_id": result.model_id,
+        "latency_ms": result.latency_ms,
+    }
+    if result.scores is not None:
+        data["scores"] = np.asarray(result.scores).tolist()
+    if result.semantic is not None:
+        sem = np.asarray(result.semantic)
+        data["semantic"] = {"shape": list(sem.shape), "classes": np.unique(sem).tolist()}
+    if result.depth is not None:
+        d = np.asarray(result.depth)
+        data["depth"] = {"shape": list(d.shape), "min": float(d.min()), "max": float(d.max())}
+    if result.normals is not None:
+        data["normals"] = {"shape": list(np.asarray(result.normals).shape)}
+    if result.detections is not None:
+        data["detections"] = _detections_to_jsonable(result.detections)
+    return data
+
+
+def _write_prediction_result(
+    image_path: Path,
+    result: Any,
+    output_dir: Path,
+    output_format: Literal["png", "json"],
+) -> Path:
+    """Write a :class:`PredictionResult` to disk, dispatching on populated fields."""
+    stem = image_path.stem
+    if output_format == "json":
+        out = output_dir / f"{stem}_prediction.json"
+        out.write_text(json.dumps(_result_to_jsonable(result, image_path), indent=2))
+        return out
+    if result.semantic is not None:
+        out = output_dir / f"{stem}_mask.png"
+        Image.fromarray(np.asarray(result.semantic).astype(np.uint8), mode="L").save(out)
+        return out
+    if result.depth is not None:
+        out = output_dir / f"{stem}_depth.png"
+        Image.fromarray(_to_uint8_gray(result.depth), mode="L").save(out)
+        return out
+    if result.normals is not None:
+        out = output_dir / f"{stem}_normal.png"
+        rgb = ((np.clip(np.asarray(result.normals, dtype=np.float32), -1, 1) + 1.0) * 127.5).astype(np.uint8)
+        Image.fromarray(rgb, mode="RGB").save(out)
+        return out
+    # detections / classification have no single-image raster: fall back to JSON.
+    out = output_dir / f"{stem}_prediction.json"
+    out.write_text(json.dumps(_result_to_jsonable(result, image_path), indent=2))
     return out
 
 

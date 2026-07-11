@@ -50,6 +50,33 @@ def test_predict_help_is_informative() -> None:
     assert "--output-dir" in result.output
 
 
+def test_predict_through_zoo_model(tmp_path: Path) -> None:
+    import numpy as np
+
+    img = tmp_path / "cell.png"
+    Image.fromarray(np.zeros((40, 48), dtype=np.uint8), mode="L").save(img)
+    out_dir = tmp_path / "out"
+
+    result = runner.invoke(
+        app,
+        ["predict", str(img), "--model", "simple-segmentation", "--output-dir", str(out_dir)],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["model"] == "simple-segmentation"
+    assert payload["task"] == "semantic_segmentation"
+    assert (out_dir / "cell_mask.png").exists()
+
+
+def test_model_list_includes_zoo_catalogue() -> None:
+    result = runner.invoke(app, ["model", "list"])
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    zoo_ids = {m["model_id"] for m in payload["zoo"]}
+    assert {"simple-segmentation", "sam3", "vision_banana"} <= zoo_ids
+
+
 def test_prelabel_dry_run_resolves_pipeline_env(
     tmp_path: Path, monkeypatch
 ) -> None:

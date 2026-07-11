@@ -57,7 +57,10 @@ def _task_model_loader(model_id: str, task: Task, encoder: str, head: str) -> An
 
 
 def _segmenter_loader(model_id: str, task: Task, segmenter_name: str) -> Any:
-    def loader(device: str | None = None, **kwargs: Any) -> Predictor:
+    # Uniform loader contract: accept checkpoint/device like every other spec so
+    # callers (CLI/serving) can pass them blindly. SAM3 loads its own weights, so
+    # checkpoint is accepted-and-ignored here.
+    def loader(checkpoint: Any = None, device: str | None = None, **kwargs: Any) -> Predictor:
         from lumen.models.registry import build_segmenter
 
         segmenter = build_segmenter(segmenter_name, **kwargs)
@@ -67,9 +70,13 @@ def _segmenter_loader(model_id: str, task: Task, segmenter_name: str) -> Any:
 
 
 def _vision_banana_loader(model_id: str, task: Task) -> Any:
-    def loader(**kwargs: Any) -> Predictor:
+    def loader(checkpoint: Any = None, device: Any = None, **kwargs: Any) -> Predictor:
         from lumen.models.vision_banana import load_vision_banana_segmenter
 
+        # checkpoint is reserved for a future LoRA-adapter path; VB loads its base
+        # model itself. Only forward device when explicitly provided.
+        if device is not None:
+            kwargs.setdefault("device", device)
         segmenter = load_vision_banana_segmenter(**kwargs)
         return VisionBananaPredictor(model_id, task, segmenter)
 
