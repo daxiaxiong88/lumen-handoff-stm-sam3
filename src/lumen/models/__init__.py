@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import lumen.models.zoo_specs  # noqa: F401 - register built-in ModelSpecs on import
 from lumen.models.dinov3 import DINOv3Encoder, load_dinov3_encoder
 from lumen.models.download import ensure_model_asset
 from lumen.models.encoder_base import EncoderBase, EncoderProtocol
@@ -60,6 +61,16 @@ from lumen.models.vision_banana import (
     encode_normal,
     load_vision_banana_segmenter,
 )
+from lumen.models.zoo import (
+    ModelSpec,
+    PredictionResult,
+    Predictor,
+    Task,
+    get_model_spec,
+    list_models,
+    load_predictor,
+    register_model,
+)
 
 __all__ = [
     "DINOv3Encoder",
@@ -112,4 +123,12 @@ __all__ = [
     "encode_depth",
     "encode_normal",
     "load_vision_banana_segmenter",
+    "ModelSpec",
+    "PredictionResult",
+    "Predictor",
+    "Task",
+    "get_model_spec",
+    "list_models",
+    "load_predictor",
+    "register_model",
 ]

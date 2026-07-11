@@ -234,10 +234,24 @@ def serve(
 
 @model_app.command("list")
 def model_list() -> None:
-    """List registered encoders, heads, and local aliases."""
+    """List the model zoo catalogue plus registered encoders/heads/aliases."""
+    from lumen.models import list_models
+
+    zoo = [
+        {
+            "model_id": spec.model_id,
+            "task": str(spec.task),
+            "family": spec.family,
+            "capabilities": list(spec.capabilities),
+            "license": spec.license,
+            "description": spec.description,
+        }
+        for spec in list_models()
+    ]
     typer.echo(
         json.dumps(
             {
+                "zoo": zoo,
                 "encoders": list_encoders(),
                 "heads": list_heads(),
                 "registry_path": str(registry_path()),
