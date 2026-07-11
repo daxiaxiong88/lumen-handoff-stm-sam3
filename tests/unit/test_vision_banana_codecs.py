@@ -436,3 +436,25 @@ class TestNormalCodec:
 
     def test_prompt(self) -> None:
         assert "surface normal" in build_normal_prompt()
+
+
+class TestResizeNearest:
+    """The decode-path resize must not blend palette colours (was BICUBIC)."""
+
+    def test_resize_introduces_no_new_colours(self) -> None:
+        from lumen.models.vision_banana.segmenter import VisionBananaSegmenter
+
+        red = np.array([255, 0, 0], dtype=np.uint8)
+        blue = np.array([0, 0, 255], dtype=np.uint8)
+        small = np.zeros((2, 2, 3), dtype=np.uint8)
+        small[0, 0] = red
+        small[0, 1] = blue
+        small[1, 0] = blue
+        small[1, 1] = red
+
+        # Upscale to a non-multiple size, the case that triggered bicubic blending.
+        out = VisionBananaSegmenter._resize_nearest(small, 7, 5)
+
+        assert out.shape == (7, 5, 3)
+        colours = {tuple(int(v) for v in c) for c in out.reshape(-1, 3)}
+        assert colours <= {tuple(int(v) for v in red), tuple(int(v) for v in blue)}

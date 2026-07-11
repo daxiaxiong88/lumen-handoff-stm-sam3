@@ -7,16 +7,17 @@ windows, and executes them concurrently on the GPU.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
 from dataclasses import dataclass
-from typing import Any, Coroutine
+from typing import Any
 
 import numpy as np
 import torch
 
 from lumen.data.supervision_bridge import SupervisionBridge
-from lumen.inference import InferenceConfig, MicroscopyInference
+from lumen.inference import MicroscopyInference
 
 logger = logging.getLogger(__name__)
 
@@ -61,10 +62,8 @@ class AsyncBatcher:
         self._running = False
         if self._worker_task:
             self._worker_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._worker_task
-            except asyncio.CancelledError:
-                pass
         logger.info("AsyncBatcher stopped")
 
     async def predict(
@@ -96,28 +95,29 @@ class AsyncBatcher:
         """Background loop that processes the queue."""
         while self._running:
             try:
-                await asyncio.sleep(0.001)  # Minimal sleep to avoid tight loop
-                
+                # Wait for the first request without holding the lock, so
+                # predict() can keep enqueuing during the accumulation window.
+                if not self._queue:
+                    await asyncio.sleep(0.001)
+                    continue
+
+                # Accumulate more requests up to the batch size or time budget.
+                # The lock is intentionally NOT held here — otherwise predict()
+                # cannot append and micro-batching never batches.
+                start_time = time.time()
+                while (
+                    len(self._queue) < self.max_batch_size
+                    and (time.time() - start_time) < self.max_wait_ms
+                ):
+                    await asyncio.sleep(0.005)
+                    if not self._running:
+                        break
+
                 async with self._lock:
                     if not self._queue:
                         continue
-                    
-                    # Wait for more requests or timeout
-                    start_time = time.time()
-                    while (
-                        len(self._queue) < self.max_batch_size and 
-                        (time.time() - start_time) < self.max_wait_ms
-                    ):
-                        await asyncio.sleep(0.005)
-                        if not self._running:
-                            break
-                    
-                    if not self._queue:
-                        continue
-
-                    # Extract batch
-                    current_batch = self._queue[:self.max_batch_size]
-                    self._queue = self._queue[self.max_batch_size:]
+                    current_batch = self._queue[: self.max_batch_size]
+                    self._queue = self._queue[self.max_batch_size :]
 
                 # Process batch outside the lock
                 await self._process_batch(current_batch)
@@ -132,36 +132,30 @@ class AsyncBatcher:
             return
 
         try:
-            # 1. Prepare images (grayscale -> 3ch normalization)
+            # 1. Prepare images: percentile-stretch grayscale -> 3ch uint8 HWC,
+            #    then move channels first. MicroscopyInference.infer expects
+            #    (B, C, H, W) and applies its own [0, 1] normalization + resize.
             prepared_images = []
             for req in requests:
-                # Reuse supervision_bridge logic for normalization
-                img = req.image
-                # MicroscopyInference.infer handles numpy -> torch and resizing
-                # but we want to ensure consistent normalization first if needed.
-                # Actually, InferenceServer scope says: 
-                # "Reuse the prepare_image_for_supervision percentile-stretch... for grayscale -> 3ch normalisation"
-                img_norm = SupervisionBridge.prepare_image(img)
-                prepared_images.append(img_norm)
+                img_hwc = SupervisionBridge.prepare_image(req.image)  # (H, W, 3) uint8
+                prepared_images.append(np.transpose(img_hwc, (2, 0, 1)))  # (3, H, W)
 
-            # 2. Stack into a single tensor
-            # Since MicroscopyInference.infer handles single images or batches,
-            # we can stack them here.
+            # 2. Stack into a single (B, C, H, W) batch.
             batch_tensor = np.stack(prepared_images)
 
             # 3. Run inference (synchronous call, run in thread to avoid blocking)
             # MicroscopyInference is not async-aware, so we use run_in_executor
             loop = asyncio.get_event_loop()
             result = await loop.run_in_executor(
-                None, 
-                self.model.infer, 
+                None,
+                self.model.infer,
                 batch_tensor
             )
 
             # 4. Scatter results
             predictions = result.predictions
             # result.predictions is (B, ...) or a list/dict of results
-            
+
             for i, req in enumerate(requests):
                 if not req.future.done():
                     # Extract i-th result

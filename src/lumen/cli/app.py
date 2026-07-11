@@ -6,8 +6,9 @@ import glob
 import json
 from enum import Enum
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
+import click
 import numpy as np
 import typer
 from PIL import Image
@@ -106,7 +107,7 @@ def predict(
             head_name=head or cfg.downstream.segmentation.decoder,
             task_type=(task.value if task is not None else "segmentation"),
             device=(device.value if device is not None else _resolve_device(cfg.device)),
-            image_size=tuple(cfg.data.image_size),
+            image_size=(int(cfg.data.image_size[0]), int(cfg.data.image_size[1])),
             encoder_kwargs=_encoder_kwargs(cfg),
             num_classes=cfg.downstream.segmentation.num_classes,
         )
@@ -136,7 +137,7 @@ def prelabel_run(
     try:
         from lumen.annotation.prelabel import PrelabelRunner
     except ImportError as exc:
-        raise typer.ClickException(
+        raise click.ClickException(
             "PrelabelRunner is not available yet. Re-run with --dry-run to validate YAML."
         ) from exc
     runner = PrelabelRunner.from_plan(plan)
@@ -149,21 +150,26 @@ def retrain_run(
     config: ConfigOption = None,
     device: DeviceOption = None,
     output_dir: OutputDirOption = Path("outputs/retrain"),
+    registry_root: Annotated[
+        Path | None,
+        typer.Option("--registry-root", help="Model registry root for base-ckpt alias resolution."),
+    ] = None,
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Validate and print the resolved plan.")] = False,
 ) -> None:
     """Run or dry-run a review-loop retraining pipeline."""
     _ = (config, device, output_dir)
-    plan = pipeline_plan(pipeline_yaml)
+    plan = _retrain_plan(pipeline_yaml, registry_root)
     if dry_run:
         typer.echo(json.dumps(plan, indent=2, sort_keys=True))
         return
-    try:
-        from lumen.review_loop import ReviewLoop  # type: ignore[import-not-found]
-    except ImportError as exc:
-        raise typer.ClickException(
-            "ReviewLoop is not available yet. Re-run with --dry-run to validate YAML."
-        ) from exc
-    ReviewLoop.from_plan(plan).run()  # type: ignore[name-defined]
+    # End-to-end execution pulls corrections from a live Label Studio project and
+    # drives lumen.retrain.IncrementalRetrainer; that orchestration is not wired
+    # into the CLI yet. Use --dry-run to validate, or the library API directly.
+    raise click.ClickException(
+        "lumen retrain run is not wired for live execution yet. Re-run with --dry-run "
+        "to validate the plan, or drive lumen.annotation.review_loop.ReviewLoop + "
+        "lumen.retrain.IncrementalRetrainer from Python."
+    )
 
 
 @sync_labels_app.command("pull")
@@ -175,7 +181,7 @@ def sync_labels_pull(
 ) -> None:
     """Pull corrected labels from Label Studio when the client is available."""
     _ = (project, config, device, output_dir)
-    raise typer.ClickException(
+    raise click.ClickException(
         "Label Studio API sync is not available in this checkout. Use exported JSON with lumen.annotation helpers."
     )
 
@@ -189,22 +195,41 @@ def sync_labels_push(
 ) -> None:
     """Push preannotations to Label Studio when the client is available."""
     _ = (project, config, device, output_dir)
-    raise typer.ClickException(
+    raise click.ClickException(
         "Label Studio API sync is not available in this checkout. Use lumen.annotation helpers to write task JSON."
     )
 
 
 @app.command()
 def serve(
-    config: ConfigOption = None,
-    device: DeviceOption = None,
-    output_dir: OutputDirOption = Path("outputs/server"),
+    host: Annotated[str, typer.Option("--host", help="Host interface to bind.")] = "127.0.0.1",
+    port: Annotated[int, typer.Option("--port", help="Port to bind.")] = 8080,
+    alias: Annotated[
+        str | None,
+        typer.Option("--alias", help="Alias to register --ckpt under (defaults to 'default')."),
+    ] = None,
+    ckpt: Annotated[
+        Path | None,
+        typer.Option("--ckpt", exists=True, readable=True, help="Checkpoint to serve."),
+    ] = None,
+    reload: Annotated[bool, typer.Option("--reload", help="Enable uvicorn autoreload (dev only).")] = False,
 ) -> None:
-    """Start the inference server when the server package is available."""
-    _ = (config, device, output_dir)
-    raise typer.ClickException(
-        "lumen serve depends on the HTTP server work from HYP-218, which is not available in this checkout."
-    )
+    """Start the FastAPI inference server (requires the ``serve`` extra).
+
+    Binds to loopback by default; the serving app has no authentication, so
+    only expose it on ``0.0.0.0`` behind a trusted network or proxy.
+    """
+    try:
+        import uvicorn
+    except ImportError as exc:  # pragma: no cover - depends on optional extra
+        raise click.ClickException(
+            "lumen serve requires the serving extra: pip install 'lumen[serve]'."
+        ) from exc
+    from lumen.serving.registry import registry
+
+    if ckpt is not None:
+        registry.register_alias(alias or "default", str(ckpt))
+    uvicorn.run("lumen.serving.app:app", host=host, port=port, reload=reload)
 
 
 @model_app.command("list")
@@ -249,7 +274,7 @@ def model_promote(name: Annotated[str, typer.Argument(help="Alias to mark active
     try:
         promote_alias(name)
     except KeyError as exc:
-        raise typer.ClickException(str(exc)) from exc
+        raise click.ClickException(str(exc)) from exc
     typer.echo(json.dumps({"active": name}, indent=2))
 
 
@@ -261,6 +286,30 @@ def download_models() -> None:
 
 def _load_lumen_config(config: Path | None) -> LumenConfig:
     return load_config(str(config)) if config is not None else load_config_from_env()
+
+
+def _retrain_plan(pipeline_yaml: Path, registry_root: Path | None) -> dict[str, Any]:
+    """Build the retrain dry-run plan, resolving the base-ckpt alias."""
+    from lumen.cli.pipeline import load_pipeline_document
+    from lumen.retrain import ModelRegistry
+
+    doc = load_pipeline_document(pipeline_yaml)
+    pipeline = doc.pipeline.model_dump(mode="json")
+    trainer = pipeline.get("trainer", {}) or {}
+    base_ckpt = trainer.get("base_ckpt")
+    resolved: str | None = None
+    if base_ckpt is not None:
+        registry = ModelRegistry(registry_root) if registry_root is not None else ModelRegistry()
+        resolved = registry.resolve(base_ckpt)
+    return {
+        "pipeline_path": str(Path(pipeline_yaml)),
+        "pipeline": pipeline,
+        "source": pipeline.get("source", {}),
+        "trainer": trainer,
+        "eval": pipeline.get("eval", {}),
+        "promote": pipeline.get("promote", {}),
+        "resolved_base_ckpt": resolved,
+    }
 
 
 def _resolve_device(device: str) -> str:

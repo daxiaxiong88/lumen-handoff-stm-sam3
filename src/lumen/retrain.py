@@ -138,7 +138,8 @@ class ModelRegistry:
         path = self.manifest_path(alias)
         if not path.exists():
             return None
-        return json.loads(path.read_text())
+        manifest: dict[str, Any] = json.loads(path.read_text())
+        return manifest
 
     def list(self) -> list[dict[str, Any]]:
         return [json.loads(path.read_text()) for path in sorted(self.root.glob("*.json"))]

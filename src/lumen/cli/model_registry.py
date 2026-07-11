@@ -43,14 +43,15 @@ def add_alias(
 ) -> dict[str, Any]:
     data = load_registry()
     aliases = data.setdefault("aliases", {})
-    aliases[name] = {
+    entry: dict[str, Any] = {
         "checkpoint": checkpoint,
         "encoder": encoder,
         "head": head,
         "task": task,
     }
+    aliases[name] = entry
     save_registry(data)
-    return aliases[name]
+    return entry
 
 
 def promote_alias(name: str) -> None:

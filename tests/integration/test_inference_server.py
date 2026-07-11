@@ -1,19 +1,17 @@
 """Integration tests for the Lumen Inference Server."""
 
+import asyncio
 import base64
 import io
-import asyncio
+
 import numpy as np
 import pytest
-import torch
-from fastapi.testclient import TestClient
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 from PIL import Image
 
+from lumen.inference import InferenceConfig, MicroscopyInference
 from lumen.serving.app import app
 from lumen.serving.registry import registry
-from lumen.inference import MicroscopyInference, InferenceConfig
-
 
 # --- Fixtures ---
 
@@ -29,24 +27,11 @@ def sample_image_b64():
 
 @pytest.fixture(autouse=True)
 def setup_mock_model(tmp_path):
-    """Set up a mock model checkpoint for testing."""
+    """Register a fake model alias so reload endpoints resolve during tests."""
     ckpt_path = tmp_path / "mock_model.pt"
-    # Create a small dummy model state
-    # MicroscopyInference expects certain keys
-    # But since we want to test the FastAPI app integration, 
-    # we can just use a real (but small) EUPE if possible, or mock the infer method.
-    
-    # Let's create a real small model and save it
-    config = InferenceConfig(encoder_name="eupe-pretrained", device="cpu")
-    # Actually, build_encoder might try to download weights. 
-    # Let's mock MicroscopyInference.load_model and MicroscopyInference.infer if needed.
-    # But the requirement is to use httpx.AsyncClient against the app.
-    
-    # We'll register a fake path for the registry
     registry.register_alias("test-model", ckpt_path)
-    # Create a dummy file so exists() returns True
+    # Create a dummy file so exists() returns True.
     ckpt_path.touch()
-    
     return ckpt_path
 
 
@@ -77,12 +62,12 @@ async def test_predict_single(sample_image_b64, monkeypatch):
         def get_model_info(self): return {"status": "mocked"}
 
     monkeypatch.setattr("lumen.serving.app.MicroscopyInference", MockInference)
-    
+
     # Load the model
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         # Trigger reload to use our mocked class
         await ac.post("/v1/models/reload?alias=test-model")
-        
+
         payload = {
             "image_b64": sample_image_b64,
             "model_alias": "test-model",
@@ -110,7 +95,7 @@ async def test_predict_batch(sample_image_b64, monkeypatch):
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         await ac.post("/v1/models/reload?alias=test-model")
-        
+
         payload = {
             "images": [
                 {"image_b64": sample_image_b64},
@@ -141,13 +126,13 @@ async def test_concurrent_stress(sample_image_b64, monkeypatch):
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         await ac.post("/v1/models/reload?alias=test-model")
-        
+
         # Send 10 simultaneous requests
         tasks = []
         payload = {"image_b64": sample_image_b64}
         for _ in range(10):
             tasks.append(ac.post("/v1/predict", json=payload))
-            
+
         responses = await asyncio.gather(*tasks)
         for resp in responses:
             assert resp.status_code == 200
@@ -172,7 +157,7 @@ async def test_hot_swap(tmp_path, sample_image_b64, monkeypatch):
     m1_path.touch()
     m2_path = tmp_path / "model2.pt"
     m2_path.touch()
-    
+
     registry.register_alias("m1", m1_path)
     registry.register_alias("m2", m2_path)
 
@@ -181,8 +166,45 @@ async def test_hot_swap(tmp_path, sample_image_b64, monkeypatch):
         await ac.post("/v1/models/reload?alias=m1")
         resp1 = await ac.post("/v1/predict", json={"image_b64": sample_image_b64})
         assert resp1.json()["predictions"] == "model1"
-        
+
         # Swap to m2
         await ac.post("/v1/models/reload?alias=m2")
         resp2 = await ac.post("/v1/predict", json={"image_b64": sample_image_b64})
         assert resp2.json()["predictions"] == "model2"
+
+
+def test_real_batcher_infer_path_accepts_hwc_images():
+    """Regression: batcher must feed CHW to the CHW-expecting model.
+
+    Runs a real MicroscopyInference (simple encoder, no checkpoint) through the
+    AsyncBatcher end to end with NO mocking of infer, so an HWC/CHW mismatch
+    surfaces here instead of being hidden behind a mock as in the tests above.
+    """
+    from lumen.serving.batcher import AsyncBatcher
+
+    cfg = InferenceConfig(
+        checkpoint_path=None,
+        encoder_name="simple",
+        head_name="segmentation",
+        task_type="segmentation",
+        device="cpu",
+        image_size=(64, 64),
+        num_classes=3,
+    )
+    model = MicroscopyInference(cfg)
+    model.load_model()
+    batcher = AsyncBatcher(model, max_batch_size=4, max_wait_ms=20.0)
+
+    async def _run():
+        # HWC uint8 inputs, exactly what decode_image() yields from PNG bytes.
+        imgs = [np.random.randint(0, 255, (48, 72), dtype=np.uint8) for _ in range(3)]
+        results = await asyncio.gather(*[batcher.predict(im) for im in imgs])
+        await batcher.stop()
+        return results
+
+    results = asyncio.run(_run())
+    assert len(results) == 3
+    for pred in results:
+        arr = np.asarray(pred)
+        assert arr.shape == (64, 64)  # segmentation map at image_size
+        assert arr.min() >= 0 and arr.max() < 3  # valid class ids

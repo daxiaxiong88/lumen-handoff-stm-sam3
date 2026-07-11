@@ -156,6 +156,10 @@ class PrelabelPrediction:
     confidence: float
     xyxy: tuple[float, ...] | None = None
     points: list[tuple[float, float]] | None = None
+    # When True, ``xyxy``/``points`` are already fractions in [0, 1] of the
+    # image (model/logits space), so downstream Label Studio conversion must
+    # NOT divide by the original pixel dimensions again.
+    normalized: bool = False
 
 
 def _logits_to_predictions(
@@ -171,7 +175,7 @@ def _logits_to_predictions(
         top_prob, top_idx = probs.max(dim=-1)
         return [
             PrelabelPrediction(
-                class_name=class_names[idx.item() % len(class_names)],
+                class_name=class_names[int(idx.item()) % len(class_names)],
                 confidence=prob.item(),
             )
             for idx, prob in zip(top_idx.unbind(), top_prob.unbind())
@@ -182,6 +186,8 @@ def _logits_to_predictions(
         pred_mask = probs.argmax(dim=0)
         height, width = int(pred_mask.shape[0]), int(pred_mask.shape[1])
         preds: list[PrelabelPrediction] = []
+        if width <= 0 or height <= 0:
+            return preds
         for ci in range(1, min(probs.shape[0], len(class_names))):
             mask = pred_mask == ci
             if not mask.any():
@@ -191,35 +197,30 @@ def _logits_to_predictions(
             y0, y1 = float(ys.min()), float(ys.max())
             if x1 <= x0 or y1 <= y0:
                 continue
+            # Normalize to [0, 1] fractions of the model/logits space so the
+            # downstream LS conversion is independent of the original image
+            # resolution (the logits are at model input size, not native size).
+            nx0, nx1 = x0 / width, x1 / width
+            ny0, ny1 = y0 / height, y1 / height
             preds.append(
                 PrelabelPrediction(
                     class_name=class_names[ci],
                     confidence=float(probs[ci][mask].mean()),
-                    points=[(x0, y0), (x1, y0), (x1, y1), (x0, y1)],
+                    points=[(nx0, ny0), (nx1, ny0), (nx1, ny1), (nx0, ny1)],
+                    normalized=True,
                 )
             )
-        if preds:
-            return preds
-        if width > 1 and height > 1 and len(class_names) > 1:
-            return [
-                PrelabelPrediction(
-                    class_name=class_names[1],
-                    confidence=float(probs[1].mean()) if probs.shape[0] > 1 else 0.0,
-                    points=[
-                        (0.0, 0.0),
-                        (float(width - 1), 0.0),
-                        (float(width - 1), float(height - 1)),
-                        (0.0, float(height - 1)),
-                    ],
-                )
-            ]
-        return []
+        # No fabricated full-image fallback: if the model predicts no
+        # foreground, emit nothing rather than a confident-looking fake label.
+        return preds
 
     if task_type == "detection" and logits.dim() == 3:
         probs = torch.softmax(logits, dim=0)
         pred_mask = probs.argmax(dim=0)
         height, width = int(pred_mask.shape[0]), int(pred_mask.shape[1])
-        preds = []
+        det_preds: list[PrelabelPrediction] = []
+        if width <= 0 or height <= 0:
+            return det_preds
         for ci in range(1, min(probs.shape[0], len(class_names))):
             mask = pred_mask == ci
             if not mask.any():
@@ -229,24 +230,16 @@ def _logits_to_predictions(
             y0, y1 = float(ys.min()), float(ys.max())
             if x1 <= x0 or y1 <= y0:
                 continue
-            preds.append(
+            det_preds.append(
                 PrelabelPrediction(
                     class_name=class_names[ci],
                     confidence=float(probs[ci][mask].mean()),
-                    xyxy=(x0, y0, x1, y1),
+                    xyxy=(x0 / width, y0 / height, x1 / width, y1 / height),
+                    normalized=True,
                 )
             )
-        if preds:
-            return preds
-        if width > 1 and height > 1 and len(class_names) > 1:
-            return [
-                PrelabelPrediction(
-                    class_name=class_names[1],
-                    confidence=float(probs[1].mean()) if probs.shape[0] > 1 else 0.0,
-                    xyxy=(0.0, 0.0, float(width - 1), float(height - 1)),
-                )
-            ]
-        return []
+        # No fabricated full-image fallback (see segmentation branch).
+        return det_preds
 
     # For batched segmentation / detection logits, emit one prediction per class
     # with mean confidence as a summary preannotation.
@@ -257,18 +250,18 @@ def _logits_to_predictions(
         probs = torch.softmax(logits, dim=-1)
         per_class_conf = probs.mean(dim=0)
 
-    preds: list[PrelabelPrediction] = []
+    summary_preds: list[PrelabelPrediction] = []
     for ci in range(per_class_conf.shape[-1]):
         conf = per_class_conf[..., ci]
         conf_val = conf.item() if conf.dim() == 0 else float(conf.mean())
         if conf_val > 0.1:
-            preds.append(
+            summary_preds.append(
                 PrelabelPrediction(
                     class_name=class_names[ci % len(class_names)],
                     confidence=conf_val,
                 )
             )
-    return preds
+    return summary_preds
 
 
 # ---------------------------------------------------------------------------
@@ -425,6 +418,8 @@ class LabelStudioSink(PrelabelSink):
     ) -> int:
         from lumen.annotation.ls_client import LabelStudioClient
 
+        if self.config.ls_url is None:
+            raise ValueError("Label Studio URL (ls_url) is required to push preannotations")
         client = LabelStudioClient(
             self.config.ls_url,
             self.config.ls_api_key,  # type: ignore[arg-type]

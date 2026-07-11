@@ -10,13 +10,15 @@ import asyncio
 import base64
 import io
 import logging
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any, Literal
 
 import numpy as np
+import torch
 from fastapi import FastAPI, HTTPException, Query
 from PIL import Image
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from lumen.inference import InferenceConfig, MicroscopyInference
 from lumen.serving.batcher import AsyncBatcher
@@ -51,7 +53,7 @@ class ModelInfo(BaseModel):
 
 class ServiceState:
     """Container for active models and batchers."""
-    
+
     def __init__(self) -> None:
         self.batcher: AsyncBatcher | None = None
         self.current_alias: str | None = None
@@ -61,7 +63,7 @@ class ServiceState:
         try:
             ckpt_path = registry.resolve_alias(alias)
             logger.info(f"Loading model from alias {alias!r} -> {ckpt_path}")
-            
+
             # Create inference engine
             config = InferenceConfig(
                 checkpoint_path=ckpt_path,
@@ -69,16 +71,16 @@ class ServiceState:
             )
             inference = MicroscopyInference(config)
             inference.load_model()
-            
+
             # Stop old batcher if exists
             if self.batcher:
                 await self.batcher.stop()
-            
+
             # Create new batcher
             self.batcher = AsyncBatcher(inference)
             await self.batcher.start()
             self.current_alias = alias
-            
+
             logger.info(f"Model {alias!r} loaded and ready for serving")
         except Exception as e:
             logger.error(f"Failed to load model {alias!r}: {e}")
@@ -98,26 +100,19 @@ def decode_image(request: PredictRequest) -> np.ndarray:
             img = Image.open(io.BytesIO(content))
             return np.array(img)
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Invalid base64 image: {e}")
-    
+            raise HTTPException(status_code=400, detail=f"Invalid base64 image: {e}") from e
+
     if request.image_url:
-        try:
-            import httpx
-            # Synchronous fetch for simplicity in this utility, 
-            # but usually should be async in the endpoint.
-            # For brevity, let's assume b64 or local paths for now 
-            # as per roboflow-inference parity.
-            raise HTTPException(status_code=501, detail="image_url not yet implemented")
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Failed to fetch image: {e}")
-            
+        # Not implemented; surface 501 directly rather than swallowing it into 400.
+        raise HTTPException(status_code=501, detail="image_url is not implemented; send image_b64")
+
     raise HTTPException(status_code=400, detail="Either image_url or image_b64 must be provided")
 
 
 # --- Lifespan ---
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Start up and shut down logic."""
     # Attempt to load default model if registered
     aliases = registry.list_aliases()
@@ -173,7 +168,7 @@ async def reload_model(alias: str = Query(..., description="Alias to load")) -> 
         await state.load_model(alias)
         return {"status": "ok", "message": f"Model {alias} loaded"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.post("/v1/predict")
@@ -181,16 +176,16 @@ async def predict(request: PredictRequest) -> dict[str, Any]:
     """Single image prediction with async micro-batching."""
     if not state.batcher:
         raise HTTPException(status_code=503, detail="No model loaded")
-        
+
     image_arr = decode_image(request)
-    
+
     # Run through batcher
     prediction = await state.batcher.predict(
         image=image_arr,
         task_type=request.task_type,
         confidence=request.confidence
     )
-    
+
     # Format result (supervision-compatible)
     # The batcher returns what MicroscopyInference.infer returns (predictions field)
     # which is usually a numpy array.
@@ -206,7 +201,7 @@ async def predict_batch(request: BatchPredictRequest) -> dict[str, Any]:
     """Batch prediction with async micro-batching."""
     if not state.batcher:
         raise HTTPException(status_code=503, detail="No model loaded")
-        
+
     # Process all in parallel
     tasks = []
     for req in request.images:
@@ -216,19 +211,16 @@ async def predict_batch(request: BatchPredictRequest) -> dict[str, Any]:
             task_type=req.task_type,
             confidence=req.confidence
         ))
-    
+
     results = await asyncio.gather(*tasks)
-    
+
     formatted_results = []
     for res in results:
         formatted_results.append(
             res.tolist() if hasattr(res, "tolist") else res
         )
-        
+
     return {
         "results": formatted_results,
         "model_alias": state.current_alias
     }
-
-# Ensure torch is available globally for the lifespan/state
-import torch

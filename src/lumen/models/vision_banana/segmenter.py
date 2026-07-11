@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import torch
+from PIL import Image
 
 from lumen.models.registry import register_segmenter
 from lumen.models.segmenter_base import SegmenterBase
@@ -425,9 +426,14 @@ class VisionBananaSegmenter(SegmenterBase):
 
     @staticmethod
     def _resize_nearest(rgb: np.ndarray, h: int, w: int) -> np.ndarray:
-        """Nearest-neighbour resize of an ``HxWx3`` array — preserves colours."""
+        """Nearest-neighbour resize of an ``HxWx3`` array — preserves colours.
+
+        The explicit ``NEAREST`` resample is load-bearing: Pillow defaults to
+        ``BICUBIC`` for RGB images, which blends palette colours at class
+        boundaries and pushes depth/normal codewords off their decode paths.
+        """
         pil = to_pil_uint8(rgb)
-        return np.asarray(pil.resize((w, h)), dtype=np.uint8)
+        return np.asarray(pil.resize((w, h), Image.Resampling.NEAREST), dtype=np.uint8)
 
 
 # A loose structural alias so the type checker accepts plain ``dict``.

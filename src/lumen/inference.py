@@ -51,6 +51,7 @@ class InferenceConfig:
     encoder_kwargs: dict[str, object] = field(default_factory=dict)
     head_kwargs: dict[str, object] = field(default_factory=dict)
     num_classes: int = 2
+    normalize: bool = True
 
 
 @dataclass
@@ -221,6 +222,16 @@ class MicroscopyInference:
             raise ValueError(
                 f"Expected 1 or 3 channels, got {images.shape[1]}"
             )
+
+        # Normalize intensities to [0, 1] per sample to match training-time
+        # preprocessing (datasets default to per-image min-max). Without this a
+        # model trained on [0, 1] inputs would silently see raw [0, 255] at
+        # inference/serve time.
+        if self.config.normalize:
+            flat = images.reshape(images.shape[0], -1)
+            lo = flat.min(dim=1).values.view(-1, 1, 1, 1)
+            hi = flat.max(dim=1).values.view(-1, 1, 1, 1)
+            images = (images - lo) / (hi - lo).clamp_min(1e-8)
 
         # Resize if needed
         if tuple(images.shape[-2:]) != self.config.image_size:

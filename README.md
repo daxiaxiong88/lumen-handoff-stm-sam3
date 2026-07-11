@@ -129,3 +129,18 @@ uv run mypy src
 - [docs/labelling.md](docs/labelling.md) — 标注流程完整文档
 - [docs/pipelines.md](docs/pipelines.md) — 管道 YAML 配置参考
 - [docs/dev.md](docs/dev.md) — 开发指南
+
+## Licensing / 许可
+
+The Lumen **framework code** is MIT-licensed. However, model families carry
+their own licenses, which govern any use of their code, weights, and outputs:
+
+- **EUPE** (the default encoder, vendored under `vendor/EUPE/`) and its published
+  weights are under the **FAIR Noncommercial Research License**. Any pipeline
+  that uses the EUPE encoder — including its outputs — is therefore restricted to
+  **non-commercial** use.
+- **DINOv3**, **SAM3**, and **FLUX.2-klein** (Vision Banana) each ship under their
+  own upstream licenses; review them before commercial deployment.
+
+For a commercial deployment, swap the default encoder for a permissively-licensed
+backbone and confirm the license of every model family you load.

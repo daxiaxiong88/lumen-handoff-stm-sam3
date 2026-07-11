@@ -9,7 +9,7 @@ import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from lumen.annotation.label_studio import LabelStudioConfig, export_corrected_labels
 from lumen.annotation.ls_client import LabelStudioClient
@@ -170,7 +170,7 @@ def _sample_from_task(task: dict[str, Any]) -> CorrectedSample:
 
 def _store_status(status: str) -> TaskStatus:
     valid = {"unlabelled", "predicted", "in_review", "accepted", "rejected"}
-    return status if status in valid else "accepted"
+    return cast("TaskStatus", status) if status in valid else "accepted"
 
 
 def _project_seed(project_root: Path, project_id: int) -> int:

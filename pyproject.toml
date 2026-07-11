@@ -3,7 +3,11 @@ name = "lumen"
 version = "0.1.0"
 description = "Lumen: Scientific Image Self-Supervised Learning Framework"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
+# NOTE: the Lumen framework code is MIT, but the default EUPE encoder (vendored
+# under vendor/EUPE) and its published weights are under the FAIR Noncommercial
+# Research License. Commercial deployments must swap to a permissively-licensed
+# encoder (e.g. DINOv3 under its own terms). See README "Licensing".
 license = {text = "MIT"}
 authors = [
     {name = "Lumen Team"}
@@ -24,9 +28,9 @@ dependencies = [
     "einops>=0.7",
     "timm>=0.9",
     "supervision>=0.28.0",
-    "minio>=7.2.20",
     "sqlalchemy>=2.0.49",
-    "xformers>=0.0.32.post2",
+    "typer>=0.12",
+    "pydantic>=2.0",
 ]
 
 [project.scripts]
@@ -37,6 +41,7 @@ lumen-download-models = "lumen.models.download:main"
 dev = [
     "pytest>=7.4",
     "pytest-cov>=4.1",
+    "pytest-asyncio>=0.23",
     "black>=23.7",
     "ruff>=0.0.285",
     "mypy>=1.5",
@@ -54,6 +59,7 @@ roboflow = [
 ]
 hyperdata = [
     "hyperdata>=0.1.0",
+    "minio>=7.2",
 ]
 transformers = [
     "transformers>=4.30",
@@ -132,10 +138,18 @@ ignore_missing_imports = true
 module = ["tifffile"]
 follow_imports = "skip"
 
+# The annotation store uses classic SQLAlchemy declarative_base()/Column style,
+# which mypy cannot model without the Mapped[] annotations (a larger refactor).
+# Silence only the ORM-shape false positives here rather than repo-wide.
+[[tool.mypy.overrides]]
+module = ["lumen.annotation.store"]
+disable_error_code = ["assignment", "misc", "valid-type"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = ""
+asyncio_mode = "strict"
 
 [dependency-groups]
 dev = [

@@ -157,6 +157,9 @@ class LabelStudioClient:
             # Build predictions if provided
             preds = predictions_by_image.get(str(image_path), [])
             if preds:
+                # Guaranteed non-None: the guard above raises when predictions
+                # are present without a config.
+                assert config is not None
                 results: list[dict[str, Any]] = []
                 for pred in preds:
                     result = prediction_to_label_studio_result(
@@ -247,7 +250,7 @@ class LabelStudioClient:
             json={"meta": meta},
         )
         resp.raise_for_status()
-        updated = resp.json()
+        updated: dict[str, Any] = resp.json()
         updated_meta = dict(updated.get("meta") or meta)
         updated_meta["lumen_status"] = status
         updated["meta"] = updated_meta

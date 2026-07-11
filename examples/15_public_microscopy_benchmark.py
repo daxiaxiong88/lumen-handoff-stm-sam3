@@ -7,7 +7,7 @@ command implementation.
 
 from __future__ import annotations
 
-from lumen.cli.main import app
+from lumen.cli.app import app
 
 if __name__ == "__main__":
     app(prog_name="lumen")

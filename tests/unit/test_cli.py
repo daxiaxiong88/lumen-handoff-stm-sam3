@@ -8,9 +8,25 @@ from pathlib import Path
 from PIL import Image
 from typer.testing import CliRunner
 
-from lumen.cli.main import app
+from lumen.cli.app import app
 
 runner = CliRunner()
+
+
+def test_console_script_main_is_callable_and_returns_exit_code() -> None:
+    # Regression guard: the ``lumen`` console script resolves ``lumen.cli:main``,
+    # which must be a callable returning an int (not the shadowed submodule).
+    from importlib.metadata import entry_points
+
+    from lumen.cli import main
+
+    assert callable(main)
+    assert main(["--help"]) == 0
+    assert main(["model", "list"]) == 0
+
+    scripts = entry_points(group="console_scripts")
+    lumen_ep = next(ep for ep in scripts if ep.name == "lumen")
+    assert lumen_ep.load() is main
 
 
 def test_root_help_lists_subcommands() -> None:

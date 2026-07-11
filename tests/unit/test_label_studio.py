@@ -56,6 +56,37 @@ def test_write_tasks_with_preannotations(tmp_path: Path) -> None:
     assert result["value"]["width"] == 40.0
 
 
+def test_normalized_prediction_is_resolution_independent(tmp_path: Path) -> None:
+    """A model preannotation (normalized coords) must map to the same LS
+    percentages regardless of the original image resolution — the prelabel
+    coordinate-space bug produced ~3x-shrunk boxes on non-square native sizes."""
+    from lumen.annotation.prelabel import PrelabelPrediction
+
+    config = LabelStudioConfig(task_type="detection", class_names=("cell",))
+    # xyxy already normalized to [0, 1] of the model space.
+    pred = PrelabelPrediction(
+        class_name="cell",
+        confidence=0.9,
+        xyxy=(0.25, 0.5, 0.75, 1.0),
+        normalized=True,
+    )
+
+    for shape in [(64, 64), (520, 704)]:  # square and LiveCELL-like
+        image_path = tmp_path / f"img_{shape[0]}x{shape[1]}.png"
+        _write_image(image_path, shape=shape)
+        tasks = write_label_studio_tasks(
+            [image_path],
+            tmp_path / f"tasks_{shape[0]}.json",
+            config=config,
+            predictions_by_image={str(image_path.resolve()): [pred]},
+        )
+        value = tasks[0]["predictions"][0]["result"][0]["value"]
+        assert value["x"] == 25.0
+        assert value["y"] == 50.0
+        assert value["width"] == 50.0
+        assert value["height"] == 50.0
+
+
 def test_export_corrected_segmentation_to_pair_dataset(tmp_path: Path) -> None:
     image_path = tmp_path / "sample.png"
     _write_image(image_path, shape=(10, 10))

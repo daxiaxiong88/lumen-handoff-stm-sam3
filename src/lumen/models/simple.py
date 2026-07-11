@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import torch
 import torch.nn as nn
 
@@ -39,11 +41,12 @@ class SimplePatchEncoder(EncoderBase):
                 f"Expected {self.in_channels} input channel(s), got {x.shape[1]}"
             )
         tokens = self.proj(x).flatten(2).transpose(1, 2)
-        return self.norm(tokens)
+        normed: torch.Tensor = self.norm(tokens)
+        return normed
 
 
 @register_encoder("simple")
-def _build_simple_encoder(**kwargs: object) -> SimplePatchEncoder:
+def _build_simple_encoder(**kwargs: Any) -> SimplePatchEncoder:
     return SimplePatchEncoder(**kwargs)
 
 

@@ -103,16 +103,25 @@ def prediction_to_label_studio_result(
         base["value"] = {"choices": [class_name]}
         return base
 
+    # Predictions may carry coordinates either in original pixel space
+    # (Roboflow-style) or already normalized to [0, 1] fractions (Lumen model
+    # preannotations, whose logits live in model space, not native size). LS
+    # wants percentages, so normalized coords scale by 100 directly while pixel
+    # coords are divided by the image dimensions first.
+    normalized = bool(getattr(prediction, "normalized", False))
+    sx = 100.0 if normalized else (100.0 / width if width > 0 else 0.0)
+    sy = 100.0 if normalized else (100.0 / height if height > 0 else 0.0)
+
     if config.task_type == "detection":
         xyxy = getattr(prediction, "xyxy", None)
         if xyxy is None or width <= 0 or height <= 0:
             return None
         x0, y0, x1, y1 = (float(v) for v in xyxy)
         base["value"] = {
-            "x": 100.0 * x0 / width,
-            "y": 100.0 * y0 / height,
-            "width": 100.0 * (x1 - x0) / width,
-            "height": 100.0 * (y1 - y0) / height,
+            "x": sx * x0,
+            "y": sy * y0,
+            "width": sx * (x1 - x0),
+            "height": sy * (y1 - y0),
             "rectanglelabels": [class_name],
         }
         return base
@@ -121,7 +130,7 @@ def prediction_to_label_studio_result(
     if not points or width <= 0 or height <= 0:
         return None
     base["value"] = {
-        "points": [[100.0 * float(x) / width, 100.0 * float(y) / height] for x, y in points],
+        "points": [[sx * float(x), sy * float(y)] for x, y in points],
         "polygonlabels": [class_name],
     }
     return base

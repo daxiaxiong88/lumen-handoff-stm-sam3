@@ -248,6 +248,7 @@ class CheckpointManager:
         load_latest: bool = False,
         model: nn.Module | None = None,
         optimizer: torch.optim.Optimizer | None = None,
+        scheduler: Any | None = None,
         device: str | torch.device = "cpu",
         strict: bool = True,
     ) -> tuple[CheckpointMetadata | None, dict[str, Any]]:
@@ -260,6 +261,7 @@ class CheckpointManager:
             load_latest: Load latest checkpoint.
             model: Model to load state into.
             optimizer: Optimizer to load state into.
+            scheduler: LR scheduler to restore state into (enables true resume).
             device: Device to load checkpoint to.
             strict: Strict state dict loading.
 
@@ -301,6 +303,11 @@ class CheckpointManager:
         # Load into optimizer
         if optimizer is not None and "optimizer_state_dict" in checkpoint_data:
             optimizer.load_state_dict(checkpoint_data["optimizer_state_dict"])
+
+        # Load into scheduler (save_checkpoint already persists this state, so
+        # restoring it here is what makes epoch-accurate resume possible).
+        if scheduler is not None and "scheduler_state_dict" in checkpoint_data:
+            scheduler.load_state_dict(checkpoint_data["scheduler_state_dict"])
 
         logger.info(f"Loaded checkpoint: {checkpoint_path}")
         return metadata, checkpoint_data
@@ -455,25 +462,53 @@ class CheckpointManager:
         Returns:
             Number of checkpoints removed.
         """
-        removed = 0
+        entries = self.list_checkpoints(encoder_name=encoder_name)
 
-        for entry in self.list_checkpoints(encoder_name=encoder_name):
+        def _recency(entry: dict[str, Any]) -> tuple[int, str]:
+            md = entry["metadata"]
+            return (int(md.get("epoch", -1)), str(md.get("timestamp", "")))
+
+        ordered = sorted(entries, key=_recency, reverse=True)
+
+        # Build the keep-set. resolve() so symlink targets compare equal to the
+        # concrete checkpoint files they point at.
+        keep_paths: set[Path] = set()
+
+        # Never delete whatever best.pt / latest.pt currently resolve to, else
+        # those symlinks would dangle after cleanup.
+        for link_name in ("best.pt", "latest.pt"):
+            link = self.checkpoints_dir / link_name
+            if link.exists():
+                keep_paths.add(link.resolve())
+
+        # Keep the keep_latest most-recent checkpoints overall...
+        for entry in ordered[: max(0, keep_latest)]:
+            keep_paths.add(Path(entry["path"]).resolve())
+
+        # ...and the keep_best most-recent checkpoints flagged is_best.
+        best_entries = [e for e in ordered if e["metadata"].get("is_best", False)]
+        for entry in best_entries[: max(0, keep_best)]:
+            keep_paths.add(Path(entry["path"]).resolve())
+
+        removed = 0
+        for entry in ordered:
             checkpoint_path = Path(entry["path"])
             metadata = entry["metadata"]
 
-            # Skip best and tagged checkpoints
-            if metadata.get("is_best", False):
-                continue
             if "keep" in metadata.get("tags", []):
                 continue
+            if checkpoint_path.resolve() in keep_paths:
+                continue
 
-            # Remove old checkpoints
-            checkpoint_path.unlink()
+            deleted = False
+            if checkpoint_path.exists():
+                checkpoint_path.unlink()
+                deleted = True
             metadata_path = checkpoint_path.parent / f"{checkpoint_path.stem}_metadata.json"
             if metadata_path.exists():
                 metadata_path.unlink()
-
-            removed += 1
+            if deleted:
+                removed += 1
 
         # Update index
         self.checkpoint_index["checkpoints"] = [
