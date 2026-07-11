@@ -51,6 +51,7 @@ from lumen.utils.quality_gate import (
     QualityGate,
     QualityScorer,
 )
+from lumen.utils.seed import seed_everything
 
 __all__ = [
     "ClassificationDownstreamConfig",
@@ -88,6 +89,7 @@ __all__ = [
     "run_few_shot_evaluation",
     "save_benchmark_result",
     "save_checkpoint",
+    "seed_everything",
     "save_few_shot_results",
     "validate_benchmark_report",
     "ConfidenceGate",

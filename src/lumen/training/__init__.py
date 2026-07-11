@@ -10,6 +10,7 @@ from lumen.training.downstream import (
     KeypointTrainer,
     SegmentationTrainer,
 )
+from lumen.training.engine import EngineConfig, TrainerEngine
 from lumen.training.hybrid import HybridTrainer
 from lumen.training.incremental import (
     EWCRegularizer,
@@ -48,6 +49,7 @@ __all__ = [
     "DetectionTrainer",
     "DiversitySampler",
     "EWCRegularizer",
+    "EngineConfig",
     "FixedLossBalancer",
     "HomoscedasticUncertaintyBalancer",
     "HybridTrainer",
@@ -65,6 +67,7 @@ __all__ = [
     "SegmentationTrainer",
     "OptimizerStageConfig",
     "StageRunner",
+    "TrainerEngine",
     "TrainerProtocol",
     "TrainingStageConfig",
     "UncertaintySampler",
