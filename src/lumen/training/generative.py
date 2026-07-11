@@ -75,6 +75,27 @@ class LoRAConfig:
 # ---------------------------------------------------------------------------
 
 
+def to_output_latent_ids(reference_ids: torch.Tensor) -> torch.Tensor:
+    """Convert reference-image position IDs (T=scale) to output-latent IDs (T=0).
+
+    The Vision Banana training target is the *denoised* latent. At inference the
+    Flux2Klein pipeline stamps the denoised latent with the output temporal
+    position ``T=0`` (``prepare_latents`` -> ``_prepare_latent_ids``), while the
+    conditioning image gets ``T=10`` (``prepare_image_latents`` ->
+    ``_prepare_image_ids``, ``scale=10``).
+
+    The trainer builds the target latent via ``prepare_image_latents`` for
+    convenience, which wrongly stamps it ``T=10`` too — so target tokens collide
+    with the conditioning tokens' positions and training diverges from the ``T=0``
+    inference path. Zeroing the T column (col 0) yields exactly the grid
+    ``_prepare_latent_ids`` would produce (identical H/W/L, ``T=0``), realigning
+    training with inference.
+    """
+    ids = reference_ids.clone()
+    ids[..., 0] = 0
+    return ids
+
+
 def make_segmentation_target(
     label_map: np.ndarray,
     class_names: Sequence[str],
@@ -350,6 +371,10 @@ class Flux2KleinLoRATrainer:
             images=[target_t], batch_size=1, generator=self.gen,
             device=device, dtype=pipe.vae.dtype,
         )
+        # The target is the denoised/output latent: stamp it with the output
+        # temporal position (T=0) that inference uses, not the reference-image
+        # position (T=10) prepare_image_latents assigns. See to_output_latent_ids.
+        latent_ids = to_output_latent_ids(latent_ids)
         image_latents, image_latent_ids = pipe.prepare_image_latents(
             images=[image_t], batch_size=1, generator=self.gen,
             device=device, dtype=pipe.vae.dtype,
@@ -496,4 +521,5 @@ __all__ = [
     "make_depth_target",
     "make_normal_target",
     "make_segmentation_target",
+    "to_output_latent_ids",
 ]

@@ -31,6 +31,7 @@ from lumen.training.generative import (
     make_depth_target,
     make_normal_target,
     make_segmentation_target,
+    to_output_latent_ids,
 )
 
 GREEN = (0, 255, 0)
@@ -38,6 +39,14 @@ RED = (255, 0, 0)
 BLACK = (0, 0, 0)
 CLASS_NAMES = ["background", "green_region", "red_region"]
 CLASS_COLORS = {"background": BLACK, "green_region": GREEN, "red_region": RED}
+
+
+def test_to_output_latent_ids_zeroes_temporal_column_and_preserves_grid() -> None:
+    ref = torch.tensor([[[10.0, 0.0, 0.0, 0.0], [10.0, 1.0, 2.0, 0.0]]])
+    out = to_output_latent_ids(ref)
+    assert torch.all(out[..., 0] == 0)  # T -> 0 (output/denoised position)
+    assert torch.equal(out[..., 1:], ref[..., 1:])  # H/W/L grid preserved
+    assert torch.all(ref[..., 0] == 10)  # input not mutated (clone)
 
 
 # ---------------------------------------------------------------------------
@@ -197,7 +206,11 @@ class _FakePipe:
         generator: Any = None, device: Any = None, dtype: Any = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         seq = 9
-        return torch.zeros(1, seq, self._dim), torch.zeros(1, seq, 3)
+        # Mirror the real pipeline: (T, H, W, L) ids with the reference-image
+        # temporal position T=10 (_prepare_image_ids, scale=10).
+        ids = torch.zeros(1, seq, 4)
+        ids[..., 0] = 10.0
+        return torch.zeros(1, seq, self._dim), ids
 
 
 @pytest.fixture
@@ -221,6 +234,19 @@ class TestFlux2KleinLoRATrainer:
         sample = fake_trainer.prepare_sample(image, "p", target, height=16, width=16)
         assert sample["target_latents"].shape == sample["image_latents"].shape
         assert sample["prompt_embeds"].dim() == 3
+
+    def test_prepare_sample_target_uses_output_temporal_position(
+        self, fake_trainer: Flux2KleinLoRATrainer
+    ) -> None:
+        # Regression for the LoRA positional-id bug: the target (denoised) latent
+        # must be stamped T=0 (like inference's output latent), while the
+        # conditioning image keeps its reference position T=10 — otherwise the two
+        # collide and training diverges from the T=0 inference path.
+        image = np.zeros((16, 16, 3), dtype=np.uint8)
+        target = np.zeros((16, 16, 3), dtype=np.uint8)
+        sample = fake_trainer.prepare_sample(image, "p", target, height=16, width=16)
+        assert torch.all(sample["latent_ids"][..., 0] == 0)
+        assert torch.all(sample["image_latent_ids"][..., 0] == 10)
 
     def test_train_step_returns_finite_loss(self, fake_trainer: Flux2KleinLoRATrainer) -> None:
         image = np.zeros((16, 16, 3), dtype=np.uint8)
