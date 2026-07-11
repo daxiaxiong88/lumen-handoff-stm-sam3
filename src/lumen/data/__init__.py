@@ -7,6 +7,7 @@ import torch
 from torch.utils.data import Dataset
 
 from lumen.data.augment import Compose, default_seg_aug
+from lumen.data.coco_detection import CocoDetectionDataset, detection_collate_fn
 from lumen.data.dataset import (
     COCOSegmentationDataset,
     FIBDataset,
@@ -96,8 +97,10 @@ from lumen.data.supervision_bridge import (
 
 __all__ = [
     "COCOSegmentationDataset",
+    "CocoDetectionDataset",
     "Compose",
     "FIBDataset",
+    "detection_collate_fn",
     "HYPERDATA_AVAILABLE",
     "HyperDataImageDataset",
     "HyperDataSegmentationDataset",
