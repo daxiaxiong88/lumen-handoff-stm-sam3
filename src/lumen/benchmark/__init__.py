@@ -8,6 +8,13 @@ visualization helpers for notebook workflows.
 from __future__ import annotations
 
 from lumen.benchmark.dataset import ValDatasetLoader
+from lumen.benchmark.dense_metrics import (
+    abs_rel,
+    angular_error,
+    angular_error_map,
+    depth_metrics,
+    normal_metrics,
+)
 from lumen.benchmark.metrics import compute_metrics, summarize_results
 from lumen.benchmark.runner import BenchmarkRunner
 from lumen.benchmark.visualize import plot_predictions, plot_summary_table
@@ -15,7 +22,12 @@ from lumen.benchmark.visualize import plot_predictions, plot_summary_table
 __all__ = [
     "BenchmarkRunner",
     "ValDatasetLoader",
+    "abs_rel",
+    "angular_error",
+    "angular_error_map",
     "compute_metrics",
+    "depth_metrics",
+    "normal_metrics",
     "plot_predictions",
     "plot_summary_table",
     "summarize_results",
