@@ -1,27 +1,30 @@
-# Lumen: 科学图像自监督学习框架
+# Lumen: 通用计算机视觉模型库 (General CV Model Zoo)
 
-基于 EUPE 紧凑通用视觉编码器 + Supervision 后处理工具链的科学图像分析框架。
+一个任务优先 (task-first) 的计算机视觉模型库，统一 **推理与训练**，以生成式密集预测家族
+**Vision Banana** (FLUX.2-klein + LoRA) 为旗舰，并保留在科学图像 (STEM/FIB/SEM) 上的自监督
+与人机协作标注能力。
 
 ## 架构概览
 
 ```
 lumen/
+├── models/        # 模型库: zoo.py (Task/ModelSpec/Predictor) + EUPE/DINOv3/SAM3/Vision Banana + 任务头
+├── training/      # 共享训练引擎 (engine.py) + 自监督/下游/生成式策略
+├── data/          # 数据加载 (COCO 检测/分割、增强、桥接)
+├── benchmark/     # 分割 + 深度/法线密集预测指标
 ├── annotation/    # Label Studio 集成、预标注、审核循环
-├── benchmark/     # 基准测试与指标计算
-├── cli/           # Typer CLI 命令
-├── data/          # 数据加载、预处理、增强
-├── models/        # EUPE 编码器、下游任务头
-├── training/      # 训练循环、自监督策略、评估
-└── utils/         # 工具函数、配置、模型注册表
+├── serving/       # FastAPI 推理服务 + 微批处理
+├── cli/           # Typer CLI (lumen predict / model list / serve ...)
+└── utils/         # 配置、检查点、随机种子、日志
 ```
 
 ## 核心特性
 
-- **EUPE 编码器**: 紧凑通用视觉编码器，支持 STEM/FIB/SEM 多模态
-- **自监督预训练**: MAE + 对比学习混合策略
-- **Supervision 集成**: 与 supervision 库无缝衔接的后处理工具链
-- **科学图像专用**: 针对材料科学、半导体、纳米技术优化的图像分析
-- **Agentic 标注循环**: 预标注 → 人工审核 → 增量重训练 → 质量门控自动推广
+- **统一模型库**: 单一 `ModelSpec` 注册表 (task + capabilities + license)，`load_predictor(model_id)` 一处加载任意家族，`PredictionResult` 统一输出。参见 [docs/adding-a-model-family.md](docs/adding-a-model-family.md)。
+- **Vision Banana (旗舰)**: FLUX.2-klein-4B + LoRA 生成式 RGB 分割/深度/法线。
+- **共享训练引擎**: AMP、梯度累积/裁剪、调度器、验证、检查点/断点续训、早停 (`TrainerEngine`)。
+- **EUPE 编码器 + 自监督**: MAE + 对比学习，支持 STEM/FIB/SEM 多模态。
+- **Agentic 标注循环**: 预标注 → 人工审核 → 增量重训练 → 质量门控自动推广。
 
 ## 快速开始
 
@@ -30,6 +33,32 @@ source .venv/bin/activate
 uv sync
 uv pip install -e ".[dev]"
 ```
+
+## 模型库 (Model Zoo)
+
+浏览、加载并运行任意注册模型 —— CLI 或 Python API 皆可：
+
+```bash
+lumen model list                              # 查看目录 (task/family/capabilities/license)
+lumen predict image.png --model simple-segmentation   # 经统一 Predictor 推理
+```
+
+```python
+from lumen.models import list_models, load_predictor, Task
+
+# 按任务发现模型
+for spec in list_models(task=Task.INSTANCE_SEGMENTATION):
+    print(spec.model_id, spec.license)
+
+# 统一加载与推理
+predictor = load_predictor("vision_banana")
+result = predictor.predict(image, class_colors={"cell": "#ff0000"})
+detections = result.detections            # 或按任务取 result.primary
+```
+
+新增模型家族 (检测/深度/开放词表等) 只需一个 `Predictor` 适配器 + 一条 `ModelSpec` 注册；
+CLI、服务与基准层自动可用。完整指南见
+[docs/adding-a-model-family.md](docs/adding-a-model-family.md)。
 
 ## 标注流程（Label Studio 人机协作）
 
@@ -126,8 +155,11 @@ uv run mypy src
 
 ## 文档
 
+- [docs/adding-a-model-family.md](docs/adding-a-model-family.md) — 如何向模型库新增一个模型家族
+- [docs/vision-banana.md](docs/vision-banana.md) — Vision Banana 生成式密集预测
 - [docs/labelling.md](docs/labelling.md) — 标注流程完整文档
 - [docs/pipelines.md](docs/pipelines.md) — 管道 YAML 配置参考
+- [docs/serving.md](docs/serving.md) — FastAPI 推理服务
 - [docs/dev.md](docs/dev.md) — 开发指南
 
 ## Licensing / 许可
