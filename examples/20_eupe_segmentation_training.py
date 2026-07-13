@@ -223,11 +223,17 @@ def train_epoch(
                 loss = trainer.segmentation_criterion(outputs, masks)
             if scaler:
                 scaler.scale(loss).backward()
+                scaler.scale(loss).backward()
                 scaler.step(trainer.optimizer)
                 scaler.update()
             else:
                 loss.backward()
                 trainer.optimizer.step()
+        else:
+            outputs = trainer.model(images)
+            loss = trainer.segmentation_criterion(outputs, masks)
+            loss.backward()
+            trainer.optimizer.step()
         else:
             outputs = trainer.model(images)
             loss = trainer.segmentation_criterion(outputs, masks)

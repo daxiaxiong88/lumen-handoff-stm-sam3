@@ -31,7 +31,7 @@ BLACK = (0, 0, 0)
 CLASS_NAMES = ["background", "pet"]
 CC = {"background": BLACK, "pet": GREEN}
 H = W = 256
-N_TRAIN = 48
+N_TRAIN = 192
 N_EVAL = 6
 
 
@@ -102,7 +102,7 @@ def main():
     print("[train] LoRA …", flush=True)
     trainer = Flux2KleinLoRATrainer(seg.pipe, LoRAConfig(rank=16, alpha=16, lr=1e-4))
     t0 = time.time()
-    losses = trainer.fit(ds_train, steps=400, height=H, width=W)
+    losses = trainer.fit(ds_train, steps=500, height=H, width=W)
     print(f"   trained 400 steps in {time.time()-t0:.0f}s; loss {losses[0]:.4f} -> {losses[-1]:.4f} (min {min(losses):.4f})", flush=True)
     trainer.save_lora("weights/vision_banana_pets_lora")
 
