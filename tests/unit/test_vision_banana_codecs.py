@@ -365,6 +365,17 @@ class TestDepthCodec:
         with pytest.raises(ValueError, match="HxW depth map"):
             encode_depth(np.zeros((2, 2, 2)))
 
+    def test_max_depth_clamps_white_singularity(self) -> None:
+        # Near-white pixels sit at the tube's white→∞ end and decode to huge
+        # metres; a valid-range cap must clamp them without touching in-range px.
+        rgb = np.array([[[254, 254, 254], [255, 0, 0]]], dtype=np.uint8)  # near-white, red
+        uncapped = decode_depth(rgb)
+        capped = decode_depth(rgb, max_depth=10.0)
+        assert uncapped[0, 0] > 50.0  # white end explodes
+        assert capped[0, 0] == 10.0  # clamped
+        assert capped[0, 1] < 2.0  # red ≈ 0.8 m untouched
+        assert np.isclose(capped[0, 1], uncapped[0, 1])
+
     def test_augmentation_colormaps(self) -> None:
         depth = np.random.RandomState(0).uniform(0.5, 10.0, (8, 8))
         cube = encode_depth(depth)
@@ -375,6 +386,49 @@ class TestDepthCodec:
 
     def test_prompt(self) -> None:
         assert "metric depth" in build_depth_prompt()
+
+
+class TestDepthFig5Fidelity:
+    """Pin the paper's Figure 5 bijection: both the metric *scale* and the
+    *colour order* of the cube-edge tube. Round-trip tests alone can't catch a
+    mirror-flipped path (encode/decode stay self-consistent), so these lock the
+    absolute mapping against Fig 5 and against ``build_depth_prompt``'s wording.
+    """
+
+    # (approx) metric depth at each of the 8 cube corners, read off Fig 5.
+    FIG5_CORNER_DEPTHS = [0.0, 0.8, 1.8, 3.2, 5.3, 8.7, 16.5]  # last corner = ∞
+
+    def test_corner_depths_match_power_transform(self) -> None:
+        # corners sit at t = k/7 along the tube; the λ=−3, c=10/3 power
+        # transform must place them at Fig 5's overlaid metres.
+        t = np.array([k / 7.0 for k in range(7)])
+        depths = inverse_power_transform_depth(t)
+        assert np.allclose(depths, self.FIG5_CORNER_DEPTHS, atol=0.1)
+
+    def test_colour_order_matches_fig5_and_prompt(self) -> None:
+        # build_depth_prompt promises black-red-yellow-green-cyan-blue-...-white.
+        # Near field must be RED (not blue): a ~0.8 m surface encodes reddish,
+        # a ~8.7 m surface encodes blueish. This is the fidelity bug guard.
+        near = encode_depth(np.array([[0.8]]))[0, 0]      # ≈ red corner
+        mid = encode_depth(np.array([[5.3]]))[0, 0]       # ≈ cyan corner
+        far = encode_depth(np.array([[8.7]]))[0, 0]       # ≈ blue corner
+        # near → red: R dominant
+        assert near[0] > 200 and near[1] < 60 and near[2] < 60
+        # mid → cyan: G,B high, R low
+        assert mid[0] < 60 and mid[1] > 200 and mid[2] > 200
+        # far → blue: B dominant
+        assert far[2] > 200 and far[0] < 60 and far[1] < 60
+
+    def test_scale_is_physically_sensible(self) -> None:
+        # A realistic indoor depth range round-trips to sane metres with the
+        # bulk of colour resolution in the near field (< 10 m), as intended.
+        depth = np.array([[0.5, 1.0, 2.0, 5.0, 10.0, 30.0]])
+        rec = decode_depth(encode_depth(depth))
+        assert np.all(rec > 0)
+        rel = np.abs(rec - depth) / depth
+        assert np.all(rel < 0.06), f"rel err {rel}"
+        # monotone: nearer surfaces always decode smaller
+        assert np.all(np.diff(rec[0]) > 0)
 
 
 class TestUnprojectDepth:

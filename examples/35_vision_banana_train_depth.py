@@ -41,11 +41,23 @@ LORA_PATH = "weights/vision_banana_depth_lora"
 DA3_MODEL = "depth-anything/DA3METRIC-LARGE"
 
 
+EVAL_CAP = 10.0  # real-metre valid-range cap (NYU-style); tames white→∞ decode
+
+
 def absrel(pred, gt):
     mask = gt > 1e-3
     if not mask.any():
         return 0.0
     return float((np.abs(pred[mask] - gt[mask]) / gt[mask]).mean())
+
+
+def delta1(pred, gt):
+    """Paper's primary depth metric (Tab. 6): fraction with max ratio < 1.25."""
+    mask = gt > 1e-3
+    if not mask.any():
+        return 0.0
+    r = np.maximum(pred[mask] / gt[mask], gt[mask] / pred[mask])
+    return float((r < 1.25).mean())
 
 
 def main():
@@ -90,12 +102,14 @@ def main():
 
     def evaluate(tag):
         seg.pipe.transformer.eval()
-        ar = []
+        ar, d1 = [], []
         for img, gt in zip(eval_imgs, eval_depths):
-            raw = seg.predict_depth(img, seed=0)  # decoded in scaled metres
-            pred = raw / D_SCALE  # back to real metres
+            # cap in scaled space, then divide back to real metres
+            raw = seg.predict_depth(img, seed=0, max_depth=D_SCALE * EVAL_CAP)
+            pred = raw / D_SCALE
             ar.append(absrel(pred, gt))
-        print(f"   {tag}: mean AbsRel={np.mean(ar):.3f}", flush=True)
+            d1.append(delta1(pred, gt))
+        print(f"   {tag}: mean AbsRel={np.mean(ar):.3f}  δ1={np.mean(d1):.3f}", flush=True)
         return np.mean(ar)
 
     print("[eval] baseline (un-tuned) …", flush=True)

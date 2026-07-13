@@ -54,9 +54,11 @@ segmentation, lumen supports the two 3D-understanding modalities:
 - **Monocular metric depth** — `seg.predict_depth(image)` → HxW metres. The RGB
   encoding is a strict bijection matching the paper (Fig 5): a Barron power
   transform (λ=−3, c=10/3) curves depth `[0,∞)` → `[0,1)`, then maps along the
-  edges of the RGB cube in the order **black(0m)→blue(1m)→cyan(2m)→green(5m)→
-  yellow(10m)→red(50m)→magenta(100m)→white(∞)** (near=dark, far=bright).
-  `encode_depth` / `decode_depth` invert exactly (unit-tested to <5% error).
+  edges of the RGB cube in the order **black(0m)→red(0.8m)→yellow(1.8m)→
+  green(3.2m)→cyan(5.3m)→blue(8.7m)→magenta(16.5m)→white(∞)** — the corner
+  metres are set by the power transform and reproduce Fig 5's overlaid values to
+  the decimal. `encode_depth` / `decode_depth` invert exactly (round-trips at
+  ~0.1% mean error), and the colour order matches the words in the depth prompt.
 - **Surface normals** — `seg.predict_normal(image)` → HxWx3 camera-space unit
   normals (+x right, +y up, +z toward camera). Per the paper, channels map as
   `R=(1−x)/2`, `G=(1+y)/2`, `B=(1+z)/2` (so facing-left →x is pinkish red, up
@@ -81,8 +83,9 @@ uv run python examples/34_vision_banana_depth_normal.py   # zero-shot depth + no
 with pseudo-GT metric depth from **Depth-Anything-V2** (Vision Banana likewise
 uses model annotations), using the corrected Fig-5 cube-edge colormap. The
 output becomes a coherent depth map in the paper's colormap — every pixel
-recoloured by depth (subject near = dark/blue/green, flat background far =
-yellow/red/white), no halo, geometrically correct (VLM-verified). Trained
+recoloured by depth (subject near = dark/red/yellow, flat background far =
+cyan/blue/white, matching Fig 5), no halo, geometrically correct (VLM-verified).
+Trained
 adapter: `weights/vision_banana_depth_lora/`. (AbsRel vs DA is scale-sensitive
 and stays high in absolute terms — DA's metric scale on close-ups is approximate
 and the FLUX output isn't calibrated to true metres; the *geometry + colormap*
@@ -100,10 +103,15 @@ surfaces greenish (+y), toward-camera background light blue (+z), smooth
 curvature on the subject (VLM-verified). Trained adapter:
 `weights/vision_banana_normal_lora/`.
 
-> **Codec note (paper v3):** the depth colormap order and the normal R-channel
-> sign were corrected to match the paper exactly — LoRAs were retrained after
-> the fix (an adapter encodes its training colormap/convention, so it must be
-> rebuilt when the codec changes). Normals remain the hardest VB task (a
+> **Codec note (paper v3):** the depth cube-edge path was mirror-flipped
+> relative to Fig 5 (it put near-field at *blue* instead of *red*) and has been
+> reordered to the paper-exact traversal
+> black→red→yellow→green→cyan→blue→magenta→white, whose corner metres the λ=−3
+> power transform reproduces to the decimal; the normal R-channel sign matches
+> `R=(1−x)/2`. The depth LoRA was retrained after this fix (an adapter encodes
+> its training colormap, so it must be rebuilt when the codec changes); the
+> normal LoRA is unaffected (its convention did not change). Normals remain the
+> hardest VB task (a
 > continuous 3-channel field, vs flat colours for seg or the 1D depth colormap):
 > 400 steps→90°, 1000→54°, 2000+rank-64+more data→28°.
 
@@ -132,9 +140,10 @@ exact schemes:
 - **Instance** (§3.1 + Appendix A): per-class dynamic colours, recovered by the
   5-stage clustering (τ=14, θ_size=2e-4, 3×3 erosion θ_erosion=0.1, bbox γ=5.0) ✓.
 - **Metric depth** (§3.2): Barron power transform (λ=−3, c=10/3) → cube-edge
-  Hilbert-style colormap **black(0m)→blue(1m)→cyan(2m)→green(5m)→yellow(10m)→
-  red(50m)→magenta(100m)→white(∞)** (Fig 5); inverted by projecting onto the
-  nearest cube edge. Training augmentation colormaps Plasma/Inferno/Viridis/
+  Hilbert-style colormap **black(0m)→red(0.8m)→yellow(1.8m)→green(3.2m)→
+  cyan(5.3m)→blue(8.7m)→magenta(16.5m)→white(∞)** (Fig 5, corner metres set by
+  the power transform); inverted by projecting onto the nearest cube edge.
+  Training augmentation colormaps Plasma/Inferno/Viridis/
   grayscale ✓. 3D point-cloud unprojection via intrinsics ✓ (Fig 6).
 - **Surface normals** (§3.2): `R=(1−x)/2, G=(1+y)/2, B=(1+z)/2`, camera-space.
 

@@ -248,12 +248,18 @@ class VisionBananaSegmenter(SegmenterBase):
         guidance_scale: float | None = None,
         height: int | None = None,
         width: int | None = None,
+        max_depth: float | None = None,
     ) -> np.ndarray:
         """Generate a metric-depth visualization and decode it to metres (HxW).
 
         The model is prompted to emit a rainbow depth image (Vision Banana
         style); :func:`~lumen.models.vision_banana.codecs.decode_depth` inverts
         the power-transform + cube-edge colormap back to metric depth.
+
+        *max_depth* caps the decoded metres to a valid range (as depth
+        benchmarks do, e.g. NYU 10 m / KITTI 80 m), suppressing the white→∞
+        decode singularity on near-white generation-noise pixels. Leave ``None``
+        for the raw, unbounded decode.
         """
         text = prompt if isinstance(prompt, str) else build_depth_prompt()
         generated = self._generate_rgb(
@@ -265,7 +271,7 @@ class VisionBananaSegmenter(SegmenterBase):
             height=height,
             width=width,
         )
-        return decode_depth(generated)
+        return decode_depth(generated, max_depth=max_depth)
 
     def predict_normal(
         self,

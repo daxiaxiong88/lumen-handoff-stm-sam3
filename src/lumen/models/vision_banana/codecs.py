@@ -269,14 +269,17 @@ def decode_instances(
         return int((ys.max() - ys.min() + 1) * (xs.max() - xs.min() + 1))
 
     means = [rgb[c].astype(np.float64).mean(axis=0) for c in comps]
+    bboxes = [bbox_area(c) for c in comps]
     for a in range(n):
         for b in range(a + 1, n):
             if find(a) == find(b):
                 continue
             if np.linalg.norm(means[a] - means[b]) > tau:
                 continue
+            # Paper eq. 6: A(Sa ∪ Sb) ≤ γ·(A(Sa) + A(Sb)), where A(·) is the
+            # *bounding-box* area of the component (not its pixel count).
             union_bbox = bbox_area(comps[a] | comps[b])
-            if union_bbox <= gamma * (comps[a].sum() + comps[b].sum()):
+            if union_bbox <= gamma * (bboxes[a] + bboxes[b]):
                 parent[find(b)] = find(a)
 
     groups: dict[int, np.ndarray] = {}
@@ -397,19 +400,23 @@ BARRON_C = 10.0 / 3.0
 
 # 8 cube corners forming a 7-edge Hamiltonian path black → … → white along the
 # edges of the RGB cube (a 3D-Hilbert-style traversal). Order matches the
-# paper's Fig 5 tube: black(0m)→blue(1m)→cyan(2m)→green(5m)→yellow(10m)→
-# red(50m)→magenta(100m)→white(∞). Each edge changes exactly one channel, so the
-# inverse projects cleanly onto one axis.
+# paper's Fig 5 tube *exactly* — the metric depths overlaid on each corner in
+# that figure are reproduced to the decimal by the λ=−3, c=10/3 power transform
+# (corner t=k/7 → depth): 0m→0.8m→1.8m→3.2m→5.3m→8.7m→16.5m→∞. Each edge changes
+# exactly one channel, so the inverse projects cleanly onto one axis, and the
+# colour order matches the words in :func:`build_depth_prompt`
+# ("black-red-yellow-green-cyan-blue-violet-white") so encode targets agree with
+# the text the model is conditioned on.
 _CUBE_PATH = np.array(
     [
-        [0, 0, 0],  # black   ≈ 0m   (near)
-        [0, 0, 1],  # blue    ≈ 1m
-        [0, 1, 1],  # cyan    ≈ 2m
-        [0, 1, 0],  # green   ≈ 5m
-        [1, 1, 0],  # yellow  ≈ 10m
-        [1, 0, 0],  # red     ≈ 50m
-        [1, 0, 1],  # magenta ≈ 100m
-        [1, 1, 1],  # white   → ∞    (far)
+        [0, 0, 0],  # black   ≈ 0.0m  (near)
+        [1, 0, 0],  # red     ≈ 0.8m
+        [1, 1, 0],  # yellow  ≈ 1.8m
+        [0, 1, 0],  # green   ≈ 3.2m
+        [0, 1, 1],  # cyan    ≈ 5.3m
+        [0, 0, 1],  # blue    ≈ 8.7m
+        [1, 0, 1],  # magenta ≈ 16.5m (paper's "violet")
+        [1, 1, 1],  # white   → ∞     (far)
     ],
     dtype=np.float64,
 )
@@ -532,15 +539,26 @@ def decode_depth(
     *,
     lam: float = BARRON_LAMBDA,
     c: float = BARRON_C,
+    max_depth: float | None = None,
 ) -> np.ndarray:
     """Decode an RGB depth visualization (HxWx3) back to metric depth (HxW, metres).
 
     Always inverts the canonical cube-edge colormap (the model is prompted with
     the rainbow/cube scheme at inference).
+
+    The tube maps white → ∞, so the power transform is singular at ``f → 1``: a
+    handful of near-white generation-noise pixels decode to arbitrarily large
+    depths and, being a mean over ``|pred−gt|/gt``, dominate metric AbsRel.
+    Depth benchmarks handle this with a valid-range cap (NYU 10 m, KITTI 80 m).
+    Pass *max_depth* to clamp the decoded metres to that cap; leave it ``None``
+    to preserve the exact, unbounded bijection (default, for round-trip tests).
     """
     rgb01 = np.asarray(rgb, dtype=np.float64) / 255.0
     f = rgb_to_curve(rgb01)
-    return inverse_power_transform_depth(f, lam, c).astype(np.float32)
+    depth = inverse_power_transform_depth(f, lam, c).astype(np.float32)
+    if max_depth is not None:
+        depth = np.clip(depth, 0.0, float(max_depth))
+    return depth
 
 
 def unproject_depth(

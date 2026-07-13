@@ -51,8 +51,9 @@ def _seg_with_lora(lora_name: str):
 
 
 def depth_viz(image: np.ndarray, seg, panel_path: Path) -> None:
-    raw = seg.predict_depth(image, seed=0)  # HxW scaled metres
-    depth = raw / 5.0  # D_SCALE=5 → real metres
+    D_SCALE = 5.0
+    raw = seg.predict_depth(image, seed=0, max_depth=D_SCALE * 10.0)  # cap 10 m real
+    depth = raw / D_SCALE  # D_SCALE=5 → real metres
     tube = seg.last_generated.copy()
     # percentile-stretched turbo (so the gradient spans the full spectrum)
     p_lo, p_hi = np.percentile(depth, [2, 98])
