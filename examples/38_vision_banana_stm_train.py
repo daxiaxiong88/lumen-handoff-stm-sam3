@@ -27,7 +27,11 @@ import numpy as np
 
 from lumen.models import build_segmenter
 from lumen.models.vision_banana.codecs import decode_semantic
-from lumen.training.generative import Flux2KleinLoRATrainer, InMemorySegDataset, LoRAConfig
+from lumen.training.generative import (
+    Flux2KleinLoRATrainer,
+    InMemorySegDataset,
+    LoRAConfig,
+)
 
 DATA = Path(__file__).resolve().parents[1] / "data" / "stm_sim"
 LORA = Path(__file__).resolve().parents[1] / "weights" / "vision_banana_stm_lora"
@@ -62,7 +66,7 @@ def predict_labelmap(seg, img, tol=48.0) -> tuple[np.ndarray, np.ndarray]:
     # re-apply so rarer classes overwrite: do ordered by priority
     pred = np.full(img.shape[:2], 0, dtype=np.int64)
     order = ["lattice", "step", "contamination", "molecule", "defect"]
-    by_name = {n: m for n, m in decoded}
+    by_name = dict(decoded)
     for name in order:
         if name in by_name:
             pred[by_name[name]] = NAME2ID[name]
@@ -82,7 +86,8 @@ def evaluate(seg, imgs, labs) -> tuple[list[float], list[np.ndarray], list[np.nd
     for img, gt in zip(imgs, labs):
         pred, gen = predict_labelmap(seg, img)
         all_iou.append(per_class_iou(pred, gt))
-        gens.append(gen); preds.append(pred)
+        gens.append(gen)
+        preds.append(pred)
     return all_iou, gens, preds
 
 
@@ -93,7 +98,8 @@ def panel(imgs, labs, preds0, gens0, preds1, gens1, path: Path, rows=6) -> None:
     for r in range(rows):
         cells = [imgs[r], cmap[labs[r]], gens0[r], cmap[preds0[r]], gens1[r], cmap[preds1[r]]]
         for c, im in enumerate(cells):
-            ax[r, c].imshow(im); ax[r, c].axis("off")
+            ax[r, c].imshow(im)
+            ax[r, c].axis("off")
             if r == 0:
                 ax[r, c].set_title(titles[c], fontsize=10)
     plt.tight_layout()
