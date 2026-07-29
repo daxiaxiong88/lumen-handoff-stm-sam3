@@ -94,6 +94,7 @@ from lumen.data.supervision_bridge import (
     segmentation_to_detections,
     upsample_logits_to_image,
 )
+from lumen.data.sxm_stm import SXMSegmentationDataset
 
 __all__ = [
     "COCOSegmentationDataset",
@@ -109,6 +110,7 @@ __all__ = [
     "ScientificImageDataset",
     "STEMDataset",
     "SupervisionBridge",
+    "SXMSegmentationDataset",
     "UnlabeledScientificImageDataset",
     "ROBOFLOW_AVAILABLE",
     "roboflow_predictions_to_mask",

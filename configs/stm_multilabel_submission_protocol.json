@@ -1,0 +1,61 @@
+{
+  "paths": {
+    "image_dir": "data/phase1_unlabeled/STM/Fete/PNG",
+    "label_studio_json": "data/phase1_unlabeled/STM/Fete/label/4-LoRA.json",
+    "labelme_dir": "data/phase1_unlabeled/STM/Fete/label",
+    "generated_dir": "outputs/stm_multilabel_lora_rgb/raw"
+  },
+  "class_names": [
+    "dark_defect",
+    "bright_defect",
+    "modulation_region",
+    "sqrt2_modulation_region"
+  ],
+  "point_radii": {
+    "dark_defect": 6,
+    "bright_defect": 9,
+    "modulation_region": 24,
+    "sqrt2_modulation_region": 20
+  },
+  "labelled_ids": [
+    "FeTe_0001", "FeTe_0002", "FeTe_0003", "FeTe_0004",
+    "FeTe_0005", "FeTe_0006", "FeTe_0007", "FeTe_0008",
+    "FeTe_0009", "FeTe_0010", "FeTe_0011", "FeTe_0012",
+    "FeTe_0013", "FeTe_0014", "FeTe_0015", "FeTe_0016",
+    "FeTe_0018", "FeTe_0019", "FeTe_0020"
+  ],
+  "fixed_holdout": ["FeTe_0007", "FeTe_0010", "FeTe_0018"],
+  "cv_folds": {
+    "fold_a": ["FeTe_0007", "FeTe_0010", "FeTe_0018"],
+    "fold_b": ["FeTe_0001", "FeTe_0008", "FeTe_0019"],
+    "fold_c": ["FeTe_0003", "FeTe_0004", "FeTe_0020"]
+  },
+  "label_budgets": {
+    "2": ["FeTe_0001", "FeTe_0003"],
+    "4": ["FeTe_0001", "FeTe_0003", "FeTe_0019", "FeTe_0020"],
+    "8": [
+      "FeTe_0001", "FeTe_0003", "FeTe_0019", "FeTe_0020",
+      "FeTe_0004", "FeTe_0008", "FeTe_0011", "FeTe_0016"
+    ],
+    "12": [
+      "FeTe_0001", "FeTe_0003", "FeTe_0019", "FeTe_0020",
+      "FeTe_0004", "FeTe_0008", "FeTe_0011", "FeTe_0016",
+      "FeTe_0002", "FeTe_0005", "FeTe_0006", "FeTe_0009"
+    ],
+    "16": [
+      "FeTe_0001", "FeTe_0002", "FeTe_0003", "FeTe_0004",
+      "FeTe_0005", "FeTe_0006", "FeTe_0008", "FeTe_0009",
+      "FeTe_0011", "FeTe_0012", "FeTe_0013", "FeTe_0014",
+      "FeTe_0015", "FeTe_0016", "FeTe_0019", "FeTe_0020"
+    ]
+  },
+  "arms": ["raw_spectral", "generated_rgb", "full_fusion"],
+  "seeds": [2026, 2027, 2028],
+  "training": {
+    "epochs": 300,
+    "batch_size": 2,
+    "learning_rate": 0.001,
+    "weight_decay": 0.0001,
+    "base_channels": 32
+  }
+}

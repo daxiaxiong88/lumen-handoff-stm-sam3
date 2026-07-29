@@ -14,17 +14,31 @@ from lumen.annotation.prelabel import (
     PrelabelReport,
     PrelabelRunner,
 )
+from lumen.annotation.stm_canonical import (
+    CanonicalShape,
+    CanonicalSTMSample,
+    evaluate_dot_instances,
+)
+from lumen.annotation.stm_multilabel import (
+    MultiLabelSTMSample,
+    multilabel_dot_instance_report,
+)
 
 __all__ = [
     "LabelStudioClient",
     "LabelStudioConfig",
     "LabellingTaskStore",
+    "CanonicalShape",
+    "CanonicalSTMSample",
+    "MultiLabelSTMSample",
     "PrelabelPipelineConfig",
     "PrelabelReport",
     "PrelabelRunner",
     "build_label_config",
+    "evaluate_dot_instances",
     "export_corrected_labels",
     "prediction_to_label_studio_result",
+    "multilabel_dot_instance_report",
     "write_label_studio_tasks",
 ]
 
