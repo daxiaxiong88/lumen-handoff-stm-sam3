@@ -27,6 +27,27 @@ class TestEUPEEncoder:
         expected_tokens = (224 // 16) * (224 // 16)
         assert out.shape == (1, expected_tokens, model.embed_dim)
 
+    def test_intermediate_patch_tokens_support_dense_heads(self) -> None:
+        """Intermediate EUPE features match the multi-scale dense-head contract."""
+        model = EUPEEncoder(embed_dim=64, depth=4, num_heads=4)
+        x = torch.randn(2, 1, 32, 32)
+
+        token_features = model.get_intermediate_patch_tokens(
+            x, layer_indices=(1, 3)
+        )
+        feature_maps = model.get_intermediate_patch_tokens(
+            x, layer_indices=(1, 3), return_feature_maps=True
+        )
+
+        assert [feature.shape for feature in token_features] == [
+            (2, 4, 64),
+            (2, 4, 64),
+        ]
+        assert [feature.shape for feature in feature_maps] == [
+            (2, 64, 2, 2),
+            (2, 64, 2, 2),
+        ]
+
     @pytest.mark.parametrize(
         "input_size, patch_size",
         [

@@ -149,6 +149,51 @@ class EUPEEncoder(EncoderBase):
         features = self.model.forward_features(x)
         return features["x_norm_patchtokens"]  # type: ignore[no-any-return]
 
+    def get_intermediate_patch_tokens(
+        self,
+        x: torch.Tensor,
+        layer_indices: tuple[int, ...] | None = None,
+        norm: bool = True,
+        return_feature_maps: bool = False,
+    ) -> list[torch.Tensor]:
+        """Return intermediate patch tokens for multi-scale dense heads.
+
+        This mirrors the DINOv3 encoder API while retaining EUPE's existing
+        input preprocessing and vendor-backed implementation.
+        """
+        if layer_indices is None:
+            # Match the conventional four evenly-spaced DINO feature levels
+            # for normal EUPE backbones.  Repeating levels keeps the public
+            # contract usable with compact encoders used in tests and quick
+            # experiments, where fewer than four transformer blocks exist.
+            layer_indices = tuple(
+                ((index + 1) * self.depth - 1) // 4
+                for index in range(4)
+            )
+        if not layer_indices:
+            raise ValueError("layer_indices must contain at least one block index")
+        if min(layer_indices) < 0:
+            raise ValueError("layer_indices must be non-negative")
+        max_idx = max(layer_indices)
+        if max_idx >= self.depth:
+            raise ValueError(
+                f"layer_indices max ({max_idx}) exceeds the number of "
+                f"transformer blocks ({self.depth})"
+            )
+
+        prepared = self.preprocess(x)
+        unique_indices = tuple(dict.fromkeys(layer_indices))
+        unique_tokens = self.model.get_intermediate_layers(
+            prepared,
+            n=list(unique_indices),
+            reshape=return_feature_maps,
+            return_class_token=False,
+            return_extra_tokens=False,
+            norm=norm,
+        )
+        by_layer = dict(zip(unique_indices, unique_tokens))
+        return [by_layer[index] for index in layer_indices]
+
     def forward_masked_tokens(
         self, x: torch.Tensor, mask: torch.Tensor
     ) -> torch.Tensor:

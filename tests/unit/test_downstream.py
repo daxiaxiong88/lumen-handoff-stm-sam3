@@ -204,7 +204,7 @@ class TestSegmentationTrainer:
         assert encoder.called is True
         assert logits.shape == (1, 2, 64, 64)
 
-    def test_dinov3_linear_head_requires_multiscale_encoder_method(
+    def test_dinov3_linear_head_accepts_eupe_multiscale_encoder(
         self, tiny_encoder: EUPEEncoder
     ) -> None:
         trainer = SegmentationTrainer(
@@ -213,8 +213,8 @@ class TestSegmentationTrainer:
             scheduler_name="none",
             segmentation_head_name="dinov3-linear",
         )
-        with pytest.raises(TypeError, match="requires intermediate features"):
-            trainer.forward(torch.randn(1, 1, 64, 64))
+        logits = trainer.forward(torch.randn(1, 1, 64, 64))
+        assert logits.shape == (1, 2, 64, 64)
 
     def test_soft_dice_rewards_foreground_overlap(self) -> None:
         target = torch.zeros(1, 16, 16, dtype=torch.long)
