@@ -481,7 +481,7 @@ def load_config(path: str, *, strict_unknown: bool = False) -> LumenConfig:
     Raises:
         ValueError: If the config is invalid.
     """
-    with open(path) as fh:
+    with open(path, encoding="utf-8") as fh:
         user = yaml.safe_load(fh) or {}
     if not isinstance(user, dict):
         raise ValueError(f"Config root must be a mapping, got {type(user).__name__}")

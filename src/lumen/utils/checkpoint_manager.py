@@ -148,6 +148,26 @@ class CheckpointManager:
         with open(path, "w") as f:
             json.dump(data, f, indent=2)
 
+    def _update_checkpoint_pointer(self, name: str, checkpoint_path: Path) -> None:
+        """Point ``name`` at a checkpoint, including restricted Windows hosts."""
+        pointer = self.checkpoints_dir / name
+        if pointer.exists() or pointer.is_symlink():
+            pointer.unlink()
+        try:
+            pointer.symlink_to(checkpoint_path)
+        except OSError:
+            # Windows commonly denies symlink creation unless Developer Mode
+            # is enabled. A hard link preserves the same on-disk payload; a
+            # regular copy is the final fallback for unusual filesystems.
+            try:
+                pointer.hardlink_to(checkpoint_path)
+            except OSError:
+                shutil.copy2(checkpoint_path, pointer)
+            logger.warning(
+                "Could not create checkpoint symlink %s; used a local fallback",
+                pointer,
+            )
+
     def save_checkpoint(
         self,
         model: nn.Module,
@@ -224,18 +244,12 @@ class CheckpointManager:
         )
         self._save_index(self.checkpoint_index_path, self.checkpoint_index)
 
-        # Update best symlink
+        # Update best checkpoint pointer.
         if is_best:
-            best_path = self.checkpoints_dir / "best.pt"
-            if best_path.exists() or best_path.is_symlink():
-                best_path.unlink()
-            best_path.symlink_to(checkpoint_path)
+            self._update_checkpoint_pointer("best.pt", checkpoint_path)
 
-        # Update latest symlink
-        latest_path = self.checkpoints_dir / "latest.pt"
-        if latest_path.exists() or latest_path.is_symlink():
-            latest_path.unlink()
-        latest_path.symlink_to(checkpoint_path)
+        # Update latest checkpoint pointer.
+        self._update_checkpoint_pointer("latest.pt", checkpoint_path)
 
         logger.info(f"Saved checkpoint: {checkpoint_path}")
         return str(checkpoint_path)
@@ -470,12 +484,12 @@ class CheckpointManager:
 
         ordered = sorted(entries, key=_recency, reverse=True)
 
-        # Build the keep-set. resolve() so symlink targets compare equal to the
-        # concrete checkpoint files they point at.
+        # Build the keep-set. resolve() makes symlink targets compare equal to
+        # concrete checkpoint files; hard-link/copy fallbacks stay loadable.
         keep_paths: set[Path] = set()
 
         # Never delete whatever best.pt / latest.pt currently resolve to, else
-        # those symlinks would dangle after cleanup.
+        # those pointers would become stale after cleanup.
         for link_name in ("best.pt", "latest.pt"):
             link = self.checkpoints_dir / link_name
             if link.exists():

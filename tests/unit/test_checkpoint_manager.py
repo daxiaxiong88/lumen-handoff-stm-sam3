@@ -20,7 +20,8 @@ def test_cleanup_honors_keep_latest_and_protects_symlink(tmp_path: Path) -> None
     ]
 
     latest = tmp_path / "checkpoints" / "latest.pt"
-    assert latest.resolve() == paths[-1].resolve()
+    assert latest.exists()
+    assert torch.load(latest, weights_only=True)["epoch"] == 5
 
     removed = mgr.cleanup_old_checkpoints(keep_best=0, keep_latest=3)
 
@@ -29,8 +30,9 @@ def test_cleanup_honors_keep_latest_and_protects_symlink(tmp_path: Path) -> None
     # The three newest survive; the three oldest are gone.
     assert paths[-1].exists() and paths[-2].exists() and paths[-3].exists()
     assert not paths[0].exists() and not paths[1].exists() and not paths[2].exists()
-    # latest.pt still resolves to a real file (no dangling symlink).
-    assert latest.exists() and latest.resolve().exists()
+    # latest.pt remains readable whether it is a symlink, hard link, or copy.
+    assert latest.exists()
+    assert torch.load(latest, weights_only=True)["epoch"] == 5
 
 
 def test_load_restores_scheduler_state(tmp_path: Path) -> None:
